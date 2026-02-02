@@ -1,0 +1,311 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Loop AI Design System - Industrial/Mission-Control Aesthetic */
+
+@layer base {
+  :root {
+    /* Core backgrounds - off-white industrial */
+    --background: 0 0% 98%;
+    --foreground: 220 20% 10%;
+
+    /* Cards & panels - subtle lift */
+    --card: 0 0% 100%;
+    --card-foreground: 220 20% 10%;
+
+    /* Popover/dropdowns */
+    --popover: 0 0% 100%;
+    --popover-foreground: 220 20% 10%;
+
+    /* Primary accent - muted teal */
+    --primary: 172 40% 40%;
+    --primary-foreground: 0 0% 100%;
+
+    /* Secondary - soft gray panels */
+    --secondary: 220 14% 96%;
+    --secondary-foreground: 220 20% 20%;
+
+    /* Muted - subtle backgrounds */
+    --muted: 220 14% 95%;
+    --muted-foreground: 220 10% 46%;
+
+    /* Accent - hover states */
+    --accent: 220 14% 93%;
+    --accent-foreground: 220 20% 10%;
+
+    /* Destructive */
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+
+    /* Borders - thin, subtle */
+    --border: 220 13% 91%;
+    --input: 220 13% 91%;
+    --ring: 172 40% 40%;
+
+    /* Radius - sharp, minimal */
+    --radius: 0.375rem;
+
+    /* Sidebar - slightly darker */
+    --sidebar-background: 220 14% 96%;
+    --sidebar-foreground: 220 10% 30%;
+    --sidebar-primary: 172 40% 40%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 220 14% 92%;
+    --sidebar-accent-foreground: 220 20% 10%;
+    --sidebar-border: 220 13% 88%;
+    --sidebar-ring: 172 40% 40%;
+
+    /* Custom tokens for Loop AI */
+    --surface-elevated: 0 0% 100%;
+    --surface-sunken: 220 14% 97%;
+    --text-primary: 220 20% 10%;
+    --text-secondary: 220 10% 46%;
+    --text-tertiary: 220 8% 60%;
+    --accent-success: 152 60% 40%;
+    --accent-warning: 38 92% 50%;
+    --accent-error: 0 72% 51%;
+    --accent-info: 200 80% 50%;
+    
+    /* Action status colors */
+    --status-queued: 220 10% 70%;
+    --status-running: 200 80% 50%;
+    --status-done: 152 60% 40%;
+    --status-error: 0 72% 51%;
+  }
+
+  .dark {
+    --background: 220 20% 8%;
+    --foreground: 220 10% 94%;
+
+    --card: 220 18% 10%;
+    --card-foreground: 220 10% 94%;
+
+    --popover: 220 18% 10%;
+    --popover-foreground: 220 10% 94%;
+
+    --primary: 172 50% 50%;
+    --primary-foreground: 220 20% 8%;
+
+    --secondary: 220 16% 14%;
+    --secondary-foreground: 220 10% 90%;
+
+    --muted: 220 16% 14%;
+    --muted-foreground: 220 10% 56%;
+
+    --accent: 220 16% 16%;
+    --accent-foreground: 220 10% 94%;
+
+    --destructive: 0 62% 50%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 220 16% 18%;
+    --input: 220 16% 18%;
+    --ring: 172 50% 50%;
+
+    --sidebar-background: 220 18% 7%;
+    --sidebar-foreground: 220 10% 80%;
+    --sidebar-primary: 172 50% 50%;
+    --sidebar-primary-foreground: 220 20% 8%;
+    --sidebar-accent: 220 16% 12%;
+    --sidebar-accent-foreground: 220 10% 94%;
+    --sidebar-border: 220 16% 16%;
+    --sidebar-ring: 172 50% 50%;
+
+    --surface-elevated: 220 18% 12%;
+    --surface-sunken: 220 20% 6%;
+    --text-primary: 220 10% 94%;
+    --text-secondary: 220 10% 60%;
+    --text-tertiary: 220 8% 50%;
+    --accent-success: 152 60% 50%;
+    --accent-warning: 38 92% 55%;
+    --accent-error: 0 65% 55%;
+    --accent-info: 200 80% 55%;
+    
+    --status-queued: 220 10% 50%;
+    --status-running: 200 80% 55%;
+    --status-done: 152 60% 50%;
+    --status-error: 0 65% 55%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+
+  /* Typography scale */
+  h1 {
+    @apply text-3xl font-semibold tracking-tight text-text-primary;
+  }
+
+  h2 {
+    @apply text-2xl font-semibold tracking-tight text-text-primary;
+  }
+
+  h3 {
+    @apply text-lg font-medium text-text-primary;
+  }
+
+  h4 {
+    @apply text-sm font-medium text-text-primary uppercase tracking-wider;
+  }
+}
+
+@layer components {
+  /* Industrial panel styling */
+  .panel {
+    @apply bg-card border border-border rounded-md;
+  }
+
+  .panel-elevated {
+    @apply bg-surface-elevated border border-border rounded-md shadow-sm;
+  }
+
+  /* Divider styling */
+  .divider {
+    @apply h-px bg-border;
+  }
+
+  /* Status indicators */
+  .status-dot {
+    @apply w-2 h-2 rounded-full;
+  }
+
+  .status-dot-online {
+    @apply bg-accent-success;
+  }
+
+  .status-dot-away {
+    @apply bg-accent-warning;
+  }
+
+  .status-dot-offline {
+    @apply bg-muted-foreground/40;
+  }
+
+  /* Action card states */
+  .action-chip {
+    @apply inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md border;
+  }
+
+  .action-chip-queued {
+    @apply bg-muted border-border text-muted-foreground;
+  }
+
+  .action-chip-running {
+    @apply bg-accent-info/10 border-accent-info/30 text-accent-info;
+  }
+
+  .action-chip-done {
+    @apply bg-accent-success/10 border-accent-success/30 text-accent-success;
+  }
+
+  .action-chip-error {
+    @apply bg-accent-error/10 border-accent-error/30 text-accent-error;
+  }
+
+  /* Scrollbar styling */
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--border)) transparent;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background-color: hsl(var(--border));
+    border-radius: 3px;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+    background-color: hsl(var(--muted-foreground) / 0.3);
+  }
+
+  /* Code block styling */
+  .code-block {
+    @apply bg-surface-sunken border border-border rounded-md p-4 font-mono text-sm overflow-x-auto;
+  }
+
+  /* Keyboard shortcut badge */
+  .kbd {
+    @apply inline-flex items-center justify-center px-1.5 py-0.5 text-[10px] font-medium bg-muted border border-border rounded text-muted-foreground;
+  }
+}
+
+@layer utilities {
+  /* Text utilities */
+  .text-primary {
+    color: hsl(var(--text-primary));
+  }
+
+  .text-secondary {
+    color: hsl(var(--text-secondary));
+  }
+
+  .text-tertiary {
+    color: hsl(var(--text-tertiary));
+  }
+
+  /* Surface utilities */
+  .bg-surface-elevated {
+    background-color: hsl(var(--surface-elevated));
+  }
+
+  .bg-surface-sunken {
+    background-color: hsl(var(--surface-sunken));
+  }
+
+  /* Accent utilities */
+  .bg-accent-success {
+    background-color: hsl(var(--accent-success));
+  }
+
+  .bg-accent-warning {
+    background-color: hsl(var(--accent-warning));
+  }
+
+  .bg-accent-error {
+    background-color: hsl(var(--accent-error));
+  }
+
+  .bg-accent-info {
+    background-color: hsl(var(--accent-info));
+  }
+
+  .text-accent-success {
+    color: hsl(var(--accent-success));
+  }
+
+  .text-accent-warning {
+    color: hsl(var(--accent-warning));
+  }
+
+  .text-accent-error {
+    color: hsl(var(--accent-error));
+  }
+
+  .text-accent-info {
+    color: hsl(var(--accent-info));
+  }
+
+  .border-accent-success {
+    border-color: hsl(var(--accent-success));
+  }
+
+  .border-accent-info {
+    border-color: hsl(var(--accent-info));
+  }
+}
