@@ -2,10 +2,27 @@
 // Structure ready for WebSocket streaming and REST endpoints
 
 import type { Workspace, Channel, Thread, Message, Action } from '@/types';
-import { workspaces, channels, threads, messages, actions, demoStreamingContent, demoActions } from './mock-data';
+import { useAppStore } from '@/store/app-store';
+import { streamOverWs } from '@/lib/api/chat-ws';
+import { workspaces, channels, threads, messages, actions } from './mock-data';
 
 // Simulated network delay
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+const buildThreadMessages = (threadId: string): Array<{ role: Message['role']; content: string }> => {
+  const { messages: stateMessages } = useAppStore.getState();
+  const threadMessages = stateMessages.filter(
+    message =>
+      message.threadId === threadId &&
+      message.content.trim().length > 0 &&
+      (message.role === 'user' || message.role === 'assistant' || message.role === 'system')
+  );
+
+  return threadMessages.map(message => ({
+    role: message.role,
+    content: message.content,
+  }));
+};
 
 // API Response types
 interface ApiResponse<T> {
@@ -95,51 +112,35 @@ export async function streamAssistant(
   _userMessage: string,
   callbacks: StreamCallbacks
 ): Promise<void> {
-  // Create initial actions
-  const streamActions: Action[] = demoActions.map((a, i) => ({
-    ...a,
-    id: `act-stream-${Date.now()}-${i}`,
-    threadId,
-    status: 'queued' as const,
-  }));
+  const wsUrl = (import.meta.env.VITE_BACKEND_WS_URL as string | undefined) || 'ws://localhost:5000/ws';
+  const messagesPayload = buildThreadMessages(threadId);
 
-  // Emit initial actions
-  streamActions.forEach(action => callbacks.onActionUpdate(action));
-
-  // Simulate action progression
-  for (let i = 0; i < streamActions.length; i++) {
-    await delay(300 + Math.random() * 200);
-    
-    // Start action
-    streamActions[i] = { 
-      ...streamActions[i], 
-      status: 'running',
-      startedAt: new Date(),
-    };
-    callbacks.onActionUpdate(streamActions[i]);
-
-    await delay(400 + Math.random() * 300);
-
-    // Complete action
-    streamActions[i] = { 
-      ...streamActions[i], 
-      status: 'done',
-      completedAt: new Date(),
-    };
-    callbacks.onActionUpdate(streamActions[i]);
-  }
-
-  // Stream text tokens
-  const words = demoStreamingContent.split(' ');
   let fullContent = '';
 
-  for (const word of words) {
-    await delay(30 + Math.random() * 20);
-    fullContent += (fullContent ? ' ' : '') + word;
-    callbacks.onToken(word + ' ');
+  try {
+    await streamOverWs({
+      wsUrl,
+      payload: { type: 'user_message', threadId, messages: messagesPayload },
+      onEvent: (event) => {
+        if (event.type === 'token' && typeof event.delta === 'string') {
+          fullContent += event.delta;
+          callbacks.onToken(event.delta);
+          return;
+        }
+
+        if (event.type === 'error') {
+          const message = typeof event.message === 'string' ? event.message : 'Unknown backend error';
+          throw new Error(message);
+        }
+      },
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error while streaming response.';
+    const errorNote = `\n\n[Assistant Error] ${message}`;
+    fullContent += errorNote;
+    callbacks.onToken(errorNote);
   }
 
-  // Complete
   const assistantMessage: Message = {
     id: `msg-${Date.now()}`,
     threadId,
@@ -168,39 +169,4 @@ export async function searchMessages(query: string, workspaceId?: string): Promi
   return { data: results, success: true };
 }
 
-// WebSocket connection placeholder
-export class WebSocketClient {
-  private url: string;
-  private ws: WebSocket | null = null;
-  private reconnectAttempts = 0;
-  private maxReconnectAttempts = 5;
-
-  constructor(url: string = 'wss://api.loop.ai/ws') {
-    this.url = url;
-  }
-
-  connect(): Promise<void> {
-    return new Promise((resolve, reject) => {
-      // In production, this would connect to real WebSocket
-      console.log('[WebSocket] Would connect to:', this.url);
-      resolve();
-    });
-  }
-
-  disconnect(): void {
-    if (this.ws) {
-      this.ws.close();
-      this.ws = null;
-    }
-  }
-
-  send(event: string, data: unknown): void {
-    console.log('[WebSocket] Would send:', event, data);
-  }
-
-  on(event: string, callback: (data: unknown) => void): void {
-    console.log('[WebSocket] Would listen for:', event);
-  }
-}
-
-export const wsClient = new WebSocketClient();
+// (WebSocket helper lives in `frontend/src/lib/api/chat-ws.ts`.)

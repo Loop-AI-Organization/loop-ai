@@ -23,3 +23,32 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Environment files (never commit secrets)
+.env
+.env.*
+!.env.example
+!**/.env.example
+
+# Python virtual environments
+.venv/
+
+# Python bytecode / caches
+__pycache__/
+*.py[cod]
+*.pyd
+
+# Tests / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Typecheck / lint caches
+.mypy_cache/
+.ruff_cache/
+
+# Local runtime files
+.python-version
+instance/
+*.sqlite3
