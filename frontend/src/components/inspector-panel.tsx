@@ -1,6 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { X, FileText, Clock, Settings2, Brain, Bookmark, File, Download, Trash2 } from 'lucide-react';
 import { useAppStore } from '@/store/app-store';
+import { fetchThreadFiles } from '@/lib/supabase-data';
+import type { ThreadFile } from '@/types';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -16,12 +18,24 @@ export function InspectorPanel() {
     actions, 
     currentThreadId,
     contextItems,
-    files,
     threadSettings,
     updateThreadSettings,
   } = useAppStore();
+  const [threadFiles, setThreadFiles] = useState<ThreadFile[]>([]);
 
   const threadActions = actions.filter(a => a.threadId === currentThreadId);
+
+  useEffect(() => {
+    if (!currentThreadId) {
+      setThreadFiles([]);
+      return;
+    }
+    let cancelled = false;
+    fetchThreadFiles(currentThreadId).then((list) => {
+      if (!cancelled) setThreadFiles(list);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [currentThreadId]);
 
   if (!isInspectorOpen) return null;
 
@@ -111,14 +125,23 @@ export function InspectorPanel() {
                 <p className="text-xs text-muted-foreground">
                   Files uploaded to this thread.
                 </p>
-                {files.length === 0 ? (
+                {threadFiles.length === 0 ? (
                   <div className="text-center py-8 text-muted-foreground text-sm">
                     No files uploaded
                   </div>
                 ) : (
                   <div className="space-y-2">
-                    {files.map((file) => (
-                      <FileCard key={file.id} file={file} />
+                    {threadFiles.map((file) => (
+                      <FileCard
+                        key={file.id}
+                        file={{
+                          id: file.id,
+                          name: file.fileName,
+                          size: file.fileSize,
+                          type: file.contentType ?? '',
+                          uploadedAt: file.createdAt,
+                        }}
+                      />
                     ))}
                   </div>
                 )}

@@ -2,6 +2,11 @@ import { useState, useRef, useEffect, KeyboardEvent } from 'react';
 import { Send, Paperclip, AtSign, Slash, Zap } from 'lucide-react';
 import { useAppStore } from '@/store/app-store';
 import { streamAssistant } from '@/lib/api-client';
+import {
+  createThread as createThreadInSupabase,
+  insertMessage as insertMessageInSupabase,
+  uploadThreadFile,
+} from '@/lib/supabase-data';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
@@ -9,17 +14,21 @@ import type { Message, Action } from '@/types';
 
 export function Composer() {
   const [value, setValue] = useState('');
+  const [uploading, setUploading] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const { 
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const {
     currentThreadId,
+    currentWorkspaceId,
+    currentChannelId,
     orchestratorStatus,
     addMessage,
     addAction,
     updateAction,
     setOrchestratorStatus,
     setStreamingMessageId,
-    createThread,
-    currentChannelId,
+    addThread,
+    replaceMessage,
   } = useAppStore();
 
   // Auto-resize textarea
@@ -32,31 +41,45 @@ export function Composer() {
 
   const handleSubmit = async () => {
     if (!value.trim() || orchestratorStatus !== 'ready') return;
-
+    const content = value.trim();
     let threadId = currentThreadId;
-    
-    // Create thread if none exists
-    if (!threadId && currentChannelId) {
-      const newThread = createThread(currentChannelId, value.slice(0, 50));
-      threadId = newThread.id;
+
+    // Create thread in Supabase if none exists
+    if (!threadId && currentWorkspaceId && currentChannelId) {
+      try {
+        const newThread = await createThreadInSupabase(
+          currentWorkspaceId,
+          currentChannelId,
+          content.slice(0, 50) || 'Untitled thread'
+        );
+        addThread(newThread);
+        threadId = newThread.id;
+      } catch {
+        return;
+      }
     }
 
     if (!threadId) return;
 
-    const userMessage: Message = {
-      id: `msg-${Date.now()}`,
-      threadId,
-      role: 'user',
-      content: value.trim(),
-      createdAt: new Date(),
-    };
+    // Persist user message to Supabase and add to store
+    let userMessage: Message;
+    try {
+      userMessage = await insertMessageInSupabase(threadId, 'user', content);
+      addMessage(userMessage);
+    } catch {
+      addMessage({
+        id: `msg-${Date.now()}`,
+        threadId,
+        role: 'user',
+        content,
+        createdAt: new Date(),
+      });
+    }
 
-    addMessage(userMessage);
     setValue('');
     setOrchestratorStatus('thinking');
 
-    // Create streaming assistant message placeholder
-    const assistantMessageId = `msg-${Date.now() + 1}`;
+    const assistantMessageId = `msg-stream-${Date.now()}`;
     const assistantMessage: Message = {
       id: assistantMessageId,
       threadId,
@@ -65,23 +88,27 @@ export function Composer() {
       createdAt: new Date(),
       isStreaming: true,
     };
-    
     addMessage(assistantMessage);
     setStreamingMessageId(assistantMessageId);
     setOrchestratorStatus('running');
 
-    // Stream response
-    await streamAssistant(threadId, userMessage.content, {
+    await streamAssistant(threadId, content, {
       onToken: (token) => {
         useAppStore.getState().appendToMessage(assistantMessageId, token);
       },
-      onComplete: () => {
+      onComplete: async (fullMessage) => {
         useAppStore.getState().updateMessage(assistantMessageId, { isStreaming: false });
         setStreamingMessageId(null);
         setOrchestratorStatus('ready');
+        try {
+          const saved = await insertMessageInSupabase(threadId!, 'assistant', fullMessage.content);
+          useAppStore.getState().replaceMessage(assistantMessageId, saved);
+        } catch {
+          // keep local message
+        }
       },
       onActionUpdate: (action: Action) => {
-        const existingAction = useAppStore.getState().actions.find(a => a.id === action.id);
+        const existingAction = useAppStore.getState().actions.find((a) => a.id === action.id);
         if (existingAction) {
           updateAction(action.id, action);
         } else {
@@ -89,6 +116,23 @@ export function Composer() {
         }
       },
     });
+  };
+
+  const handleAttachFile = () => {
+    if (!currentThreadId || !currentWorkspaceId) return;
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file || !currentThreadId || !currentWorkspaceId) return;
+    setUploading(true);
+    try {
+      await uploadThreadFile(currentThreadId, currentWorkspaceId, file);
+    } finally {
+      setUploading(false);
+    }
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -123,8 +167,22 @@ export function Composer() {
         />
         
         {/* Action buttons */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          className="hidden"
+          accept="*"
+          onChange={handleFileChange}
+        />
         <div className="absolute right-2 bottom-2 flex items-center gap-1">
-          <Button variant="ghost" size="icon" className="h-8 w-8" title="Attach file">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8"
+            title="Attach file"
+            disabled={!currentThreadId || !currentWorkspaceId || uploading}
+            onClick={handleAttachFile}
+          >
             <Paperclip className="w-4 h-4 text-muted-foreground" />
           </Button>
           <Button 

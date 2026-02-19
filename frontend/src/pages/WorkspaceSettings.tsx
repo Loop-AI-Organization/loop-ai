@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useEffect } from 'react';
 import { useAppStore } from '@/store/app-store';
@@ -7,13 +8,132 @@ import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '@/components/ui/dialog';
+import { deleteWorkspace, fetchChannels, updateWorkspace, fetchWorkspaceMembers, addWorkspaceMemberByEmail } from '@/lib/supabase-data';
+import type { WorkspaceMember } from '@/types';
 
 export default function WorkspaceSettings() {
   const { workspaceId } = useParams<{ workspaceId: string }>();
-  const { workspaces, setCurrentWorkspace } = useAppStore();
   const navigate = useNavigate();
+  const [deleting, setDeleting] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [name, setName] = useState('');
+  const [icon, setIcon] = useState('');
+  const [members, setMembers] = useState<WorkspaceMember[]>([]);
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviting, setInviting] = useState(false);
+  const [inviteError, setInviteError] = useState<string | null>(null);
+  const [inviteSuccess, setInviteSuccess] = useState<string | null>(null);
+  const {
+    workspaces,
+    currentWorkspaceId,
+    setCurrentWorkspace,
+    setWorkspaces,
+    setChannels,
+    setThreads,
+    setMessages,
+    setCurrentChannel,
+    setCurrentThread,
+  } = useAppStore();
 
   const workspace = workspaces.find(w => w.id === workspaceId);
+
+  useEffect(() => {
+    if (workspace) {
+      setName(workspace.name);
+      setIcon(workspace.icon);
+    }
+  }, [workspace?.id, workspace?.name, workspace?.icon]);
+
+  useEffect(() => {
+    if (!workspaceId) return;
+    let cancelled = false;
+    fetchWorkspaceMembers(workspaceId).then((list) => {
+      if (!cancelled) setMembers(list);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [workspaceId]);
+
+  const handleInvite = async () => {
+    if (!workspaceId || !inviteEmail.trim()) return;
+    setInviting(true);
+    setInviteError(null);
+    setInviteSuccess(null);
+    try {
+      const result = await addWorkspaceMemberByEmail(workspaceId, inviteEmail.trim());
+      if (result.invited) {
+        setInviteSuccess(result.message ?? 'Invite email sent. When they sign up, they\'ll be added to the workspace.');
+        setInviteEmail('');
+      } else {
+        const list = await fetchWorkspaceMembers(workspaceId);
+        setMembers(list);
+        setInviteEmail('');
+        setInviteOpen(false);
+      }
+    } catch (e) {
+      setInviteError(e instanceof Error ? e.message : 'Invite failed');
+    } finally {
+      setInviting(false);
+    }
+  };
+
+  const handleSaveGeneral = async () => {
+    if (!workspaceId || !workspace) return;
+    setSaving(true);
+    try {
+      const updated = await updateWorkspace(workspaceId, { name, icon });
+      setWorkspaces(workspaces.map(w => w.id === workspaceId ? { ...w, name: updated.name, icon: updated.icon } : w));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDeleteWorkspace = async () => {
+    if (!workspaceId || !workspace) return;
+    if (!window.confirm('Delete this workspace? This cannot be undone.')) return;
+    setDeleting(true);
+    try {
+      await deleteWorkspace(workspaceId);
+      const remaining = workspaces.filter((w) => w.id !== workspaceId);
+      setWorkspaces(remaining);
+      if (currentWorkspaceId === workspaceId) {
+        if (remaining.length === 0) {
+          setChannels([]);
+          setThreads([]);
+          setMessages([]);
+          useAppStore.setState({ currentWorkspaceId: null, currentChannelId: null, currentThreadId: null });
+          navigate('/app');
+        } else {
+          const other = remaining[0];
+          const channels = await fetchChannels(other.id);
+          setCurrentWorkspace(other.id);
+          setChannels(channels);
+          const firstChannelId = channels[0]?.id;
+          if (firstChannelId) {
+            setCurrentChannel(firstChannelId);
+            setCurrentThread(null);
+            setThreads([]);
+            setMessages([]);
+            navigate(`/app/${other.id}/${firstChannelId}`);
+          } else {
+            setThreads([]);
+            setMessages([]);
+            useAppStore.setState({ currentChannelId: null, currentThreadId: null });
+            navigate('/app');
+          }
+        }
+      }
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   useEffect(() => {
     if (!workspace) {
@@ -50,17 +170,27 @@ export default function WorkspaceSettings() {
           <div className="space-y-4 p-4 rounded-lg border border-border">
             <div className="space-y-2">
               <Label>Workspace name</Label>
-              <Input defaultValue={workspace.name} />
+              <Input value={name} onChange={(e) => setName(e.target.value)} />
             </div>
             <div className="space-y-2">
               <Label>Workspace icon</Label>
               <div className="flex items-center gap-3">
                 <div className="w-12 h-12 rounded-lg bg-primary flex items-center justify-center text-xl font-semibold text-primary-foreground">
-                  {workspace.icon}
+                  {icon || '◎'}
                 </div>
-                <Button variant="outline" size="sm">Change</Button>
+                <Input
+                  className="w-20 text-center text-lg"
+                  value={icon}
+                  onChange={(e) => setIcon(e.target.value)}
+                  placeholder="◎"
+                  maxLength={2}
+                />
+                <Button variant="outline" size="sm" onClick={() => setIcon('◎')}>Reset</Button>
               </div>
             </div>
+            <Button onClick={handleSaveGeneral} disabled={saving}>
+              {saving ? 'Saving…' : 'Save'}
+            </Button>
           </div>
         </section>
 
@@ -70,24 +200,56 @@ export default function WorkspaceSettings() {
         <section className="space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-medium">Members</h2>
-            <Button variant="outline" size="sm" className="gap-1.5">
+            <Button variant="outline" size="sm" className="gap-1.5" onClick={() => { setInviteOpen(true); setInviteError(null); setInviteSuccess(null); setInviteEmail(''); }}>
               <Users className="w-4 h-4" />
               Invite
             </Button>
           </div>
-          <div className="p-4 rounded-lg border border-border">
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-full bg-muted flex items-center justify-center text-sm font-medium">
-                AC
-              </div>
-              <div className="flex-1">
-                <p className="text-sm font-medium">Alex Chen</p>
-                <p className="text-xs text-muted-foreground">alex@loop.ai</p>
-              </div>
-              <span className="text-xs text-muted-foreground bg-muted px-2 py-1 rounded">Owner</span>
-            </div>
+          <div className="p-4 rounded-lg border border-border space-y-3">
+            {members.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No members yet.</p>
+            ) : (
+              members.map((m) => (
+                <div key={m.id} className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-full bg-muted flex items-center justify-center text-sm font-medium">
+                    {m.userId.slice(0, 2).toUpperCase()}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate">{m.email ?? m.userId}</p>
+                  </div>
+                  <span className="text-xs text-muted-foreground bg-muted px-2 py-1 rounded capitalize">{m.role}</span>
+                </div>
+              ))
+            )}
           </div>
         </section>
+
+        <Dialog open={inviteOpen} onOpenChange={setInviteOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Invite by email</DialogTitle>
+            </DialogHeader>
+            <p className="text-sm text-muted-foreground">Enter an email to add them to this workspace. If they don&apos;t have an account, we&apos;ll send an invite to sign up.</p>
+            <div className="space-y-2">
+              <Label>Email</Label>
+              <Input
+                type="email"
+                value={inviteEmail}
+                onChange={(e) => setInviteEmail(e.target.value)}
+                placeholder="colleague@example.com"
+                onKeyDown={(e) => e.key === 'Enter' && handleInvite()}
+              />
+              {inviteError && <p className="text-sm text-destructive">{inviteError}</p>}
+              {inviteSuccess && <p className="text-sm text-green-600 dark:text-green-400">{inviteSuccess}</p>}
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setInviteOpen(false)}>Cancel</Button>
+              <Button onClick={() => void handleInvite()} disabled={inviting || !inviteEmail.trim()}>
+                {inviting ? 'Inviting…' : 'Invite'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         <Separator />
 
@@ -131,9 +293,15 @@ export default function WorkspaceSettings() {
                   This action cannot be undone
                 </p>
               </div>
-              <Button variant="destructive" size="sm" className="gap-1.5">
+              <Button
+                variant="destructive"
+                size="sm"
+                className="gap-1.5"
+                onClick={handleDeleteWorkspace}
+                disabled={deleting}
+              >
                 <Trash2 className="w-4 h-4" />
-                Delete
+                {deleting ? 'Deleting…' : 'Delete'}
               </Button>
             </div>
           </div>

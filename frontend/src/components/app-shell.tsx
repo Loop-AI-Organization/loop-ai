@@ -1,3 +1,5 @@
+import { useEffect, useRef } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { AppSidebar } from './app-sidebar';
 import { ChatHeader } from './chat-header';
 import { MessageList } from './message-list';
@@ -6,19 +8,83 @@ import { InspectorPanel } from './inspector-panel';
 import { CommandPalette } from './command-palette';
 import { ActionChipsBar } from './action-chip';
 import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts';
+import { useAppData } from '@/hooks/use-app-data';
 import { useAppStore } from '@/store/app-store';
+import { acceptWorkspaceInvite, fetchChannels } from '@/lib/supabase-data';
 import { cn } from '@/lib/utils';
 
 export function AppShell() {
   useKeyboardShortcuts();
-  
-  const { actions, currentThreadId, isInspectorOpen, isSidebarOpen } = useAppStore();
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const { dataLoading, dataError } = useAppData();
+  const acceptInviteDone = useRef(false);
+
+  const {
+    actions,
+    currentThreadId,
+    isInspectorOpen,
+    isSidebarOpen,
+    setChannels,
+    setCurrentWorkspace,
+    setCurrentChannel,
+    setThreads,
+    setMessages,
+    setCurrentThread,
+  } = useAppStore();
+
+  // After sign-up from invite link: ?workspace_id=...&invited=1 → accept invite and go to workspace
+  useEffect(() => {
+    const workspaceId = searchParams.get('workspace_id');
+    const invited = searchParams.get('invited');
+    if (!workspaceId || invited !== '1' || acceptInviteDone.current || dataLoading) return;
+    acceptInviteDone.current = true;
+    acceptWorkspaceInvite(workspaceId)
+      .then(() => fetchChannels(workspaceId))
+      .then((channels) => {
+        setChannels(channels);
+        setCurrentWorkspace(workspaceId);
+        const firstId = channels[0]?.id;
+        if (firstId) {
+          setCurrentChannel(firstId);
+          setThreads([]);
+          setMessages([]);
+          setCurrentThread(null);
+          setSearchParams({}, { replace: true });
+          navigate(`/app/${workspaceId}/${firstId}`, { replace: true });
+        } else {
+          setSearchParams({}, { replace: true });
+        }
+      })
+      .catch(() => {
+        acceptInviteDone.current = false;
+        setSearchParams({}, { replace: true });
+      });
+  }, [searchParams, dataLoading, setChannels, setCurrentWorkspace, setCurrentChannel, setThreads, setMessages, setCurrentThread, navigate, setSearchParams]);
   
   // Get streaming/active actions for the current thread
-  const activeActions = actions.filter(a => 
-    a.threadId === currentThreadId && 
-    (a.status === 'running' || a.status === 'queued')
+  const activeActions = actions.filter(
+    (a) => a.threadId === currentThreadId && (a.status === 'running' || a.status === 'queued')
   );
+
+  if (dataLoading) {
+    return (
+      <div className="h-screen flex items-center justify-center bg-background">
+        <div className="animate-pulse text-muted-foreground">Loading your workspaces…</div>
+      </div>
+    );
+  }
+
+  if (dataError) {
+    return (
+      <div className="h-screen flex items-center justify-center bg-background p-4">
+        <div className="text-center space-y-2">
+          <p className="text-destructive">{dataError}</p>
+          <p className="text-sm text-muted-foreground">Check your connection and try again.</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="h-screen flex overflow-hidden bg-background">
