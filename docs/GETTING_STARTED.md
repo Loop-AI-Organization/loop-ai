@@ -60,7 +60,7 @@ There are **two** env files: repo root `.env` (backend) and `frontend/.env` (fro
 
 **Single source of truth (recommended):**
 
-1. Create and edit the **root** `.env`:
+1. Create and edit the **root** `.env` (e.g. copy from `.env.example` or `backend/.env.example`):
 
 ```powershell
 cd c:\Users\adith\dev\loop-ai
@@ -73,6 +73,7 @@ Edit `.env` and set:
 - `SUPABASE_ANON_KEY` = anon key
 - `SUPABASE_SERVICE_ROLE_KEY` = service_role key
 - `REDIS_URL` = `redis://localhost:6379` (or your Redis URL)
+- `OPENROUTER_API_KEY` = your key from [OpenRouter](https://openrouter.ai/keys) (required for the LLM). Optional: `OPENROUTER_MODEL`, `OPENROUTER_MAX_TOKENS`, `OPENROUTER_TEMPERATURE` (see `backend/.env.example`).
 
 2. Sync to the frontend (writes `frontend/.env` with `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` from root `.env`):
 

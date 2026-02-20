@@ -1,0 +1,55 @@
+# Render Blueprint for Loop AI (Option A: managed deployment)
+# Connect this repo in Render and add env vars in the dashboard (see docs/DEPLOYMENT.md).
+
+services:
+  - type: web
+    name: loop-ai-api
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: loop-ai-redis
+          property: connectionString
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: CORS_ORIGIN
+        sync: false
+      - key: SITE_URL
+        sync: false
+
+  - type: worker
+    name: loop-ai-worker
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: python worker.py
+    envVars:
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: loop-ai-redis
+          property: connectionString
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: OPENROUTER_API_KEY
+        sync: false
+
+  - type: keyvalue
+    name: loop-ai-redis
+    ipAllowList:
+      - source: 0.0.0.0/0
+        description: allow all (services in same region use internal URL)

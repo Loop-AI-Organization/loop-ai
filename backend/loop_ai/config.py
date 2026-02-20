@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from pathlib import Path
+
+from dotenv import load_dotenv
 
 
 def _getenv(name: str, default: str | None = None) -> str | None:
@@ -23,6 +26,10 @@ class Settings:
 
 
 def load_settings() -> Settings:
+    _root = Path(__file__).resolve().parent.parent.parent
+    load_dotenv(_root / ".env")
+    load_dotenv(_root / "backend" / ".env")
+
     api_key = _getenv("OPENROUTER_API_KEY")
     if not api_key:
         raise RuntimeError("Missing OPENROUTER_API_KEY")

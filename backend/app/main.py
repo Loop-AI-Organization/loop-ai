@@ -1,3 +1,11 @@
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+# Load root .env so OPENROUTER_* and other vars are in os.environ for loop_ai.config
+_env_path = Path(__file__).resolve().parent.parent.parent / ".env"
+load_dotenv(_env_path)
+
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
