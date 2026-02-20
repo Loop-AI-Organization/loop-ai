@@ -1,11 +1,14 @@
 from typing import Annotated
+import asyncio
+import json
 import httpx
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 from .config import get_settings
 from .supabase_client import supabase
 from .redis_queue import enqueue_action
 from .auth import get_current_user
+from loop_ai.orchestrator.orchestrator import stream_assistant_reply
 
 router = APIRouter()
 
@@ -214,3 +217,103 @@ async def queue_action(
     # Enqueue job (worker will update action status)
     job = enqueue_action(body.thread_id, body.label, action_id=action_id)
     return {"queued": True, "job_id": job.id, "action_id": action_id}
+
+
+# --- WebSocket chat ---
+
+def _coerce_messages(payload: dict) -> list[dict[str, str]]:
+    """Accept {messages: [{role, content}]} or {content: "..."} (single user message fallback)."""
+    messages = payload.get("messages")
+    if isinstance(messages, list):
+        out = [
+            {"role": item["role"], "content": item["content"]}
+            for item in messages
+            if isinstance(item, dict)
+            and isinstance(item.get("role"), str)
+            and isinstance(item.get("content"), str)
+            and item["role"]
+            and item["content"]
+        ]
+        if out:
+            return out
+    content = payload.get("content")
+    if isinstance(content, str) and content.strip():
+        return [{"role": "user", "content": content.strip()}]
+    return []
+
+
+@router.websocket("/ws")
+async def ws_chat(websocket: WebSocket):
+    await websocket.accept()
+    while True:
+        try:
+            raw = await websocket.receive_text()
+        except WebSocketDisconnect:
+            break
+
+        try:
+            payload = json.loads(raw)
+        except Exception:
+            await websocket.send_text(json.dumps({"type": "error", "message": "Invalid JSON"}))
+            continue
+
+        if not isinstance(payload, dict):
+            await websocket.send_text(json.dumps({"type": "error", "message": "Invalid JSON"}))
+            continue
+
+        msg_type = payload.get("type")
+        thread_id = payload.get("threadId") if isinstance(payload.get("threadId"), str) else "unknown"
+
+        if msg_type != "user_message":
+            await websocket.send_text(
+                json.dumps({"type": "error", "threadId": thread_id, "message": f"Unknown type: {msg_type}"})
+            )
+            continue
+
+        msgs = _coerce_messages(payload)
+        if not msgs:
+            await websocket.send_text(
+                json.dumps({"type": "error", "threadId": thread_id, "message": "Missing messages/content"})
+            )
+            continue
+
+        try:
+            # Bridge the synchronous streaming generator to async via a thread + queue
+            queue: asyncio.Queue = asyncio.Queue()
+            loop = asyncio.get_running_loop()
+
+            def _run_gen() -> None:
+                try:
+                    for delta in stream_assistant_reply(messages=msgs):
+                        asyncio.run_coroutine_threadsafe(queue.put(("token", delta)), loop)
+                    asyncio.run_coroutine_threadsafe(queue.put(("done", None)), loop)
+                except Exception as exc:
+                    asyncio.run_coroutine_threadsafe(queue.put(("error", str(exc))), loop)
+
+            executor_task = loop.run_in_executor(None, _run_gen)
+
+            while True:
+                kind, value = await queue.get()
+                if kind == "token":
+                    await websocket.send_text(
+                        json.dumps({"type": "token", "threadId": thread_id, "delta": value})
+                    )
+                elif kind == "done":
+                    await websocket.send_text(json.dumps({"type": "done", "threadId": thread_id}))
+                    break
+                elif kind == "error":
+                    await websocket.send_text(
+                        json.dumps({"type": "error", "threadId": thread_id, "message": value})
+                    )
+                    break
+
+            await executor_task
+        except WebSocketDisconnect:
+            break
+        except Exception as exc:
+            try:
+                await websocket.send_text(
+                    json.dumps({"type": "error", "threadId": thread_id, "message": str(exc)})
+                )
+            except Exception:
+                pass
