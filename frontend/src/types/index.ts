@@ -6,6 +6,13 @@ export interface Workspace {
   icon: string;
 }
 
+export interface WorkspaceMember {
+  id: string;
+  userId: string;
+  role: 'owner' | 'member';
+  email?: string;
+}
+
 export interface Channel {
   id: string;
   workspaceId: string;
@@ -75,4 +82,15 @@ export interface FileItem {
   type: string;
   uploadedAt: Date;
   url: string;
+}
+
+export interface ThreadFile {
+  id: string;
+  threadId: string;
+  storagePath: string;
+  fileName: string;
+  fileSize: number;
+  contentType: string | null;
+  uploadedBy: string;
+  createdAt: Date;
 }

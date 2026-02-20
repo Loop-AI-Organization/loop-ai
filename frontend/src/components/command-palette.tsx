@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Search, Hash, MessageSquare, Plus, ArrowRight } from 'lucide-react';
 import { useAppStore } from '@/store/app-store';
+import { createThread as createThreadInSupabase } from '@/lib/supabase-data';
 import {
   CommandDialog,
   CommandEmpty,
@@ -12,17 +13,18 @@ import {
 } from '@/components/ui/command';
 
 export function CommandPalette() {
-  const { 
-    isCommandPaletteOpen, 
+  const {
+    isCommandPaletteOpen,
     setCommandPaletteOpen,
     channels,
     threads,
     currentWorkspaceId,
     setCurrentChannel,
     setCurrentThread,
-    createThread,
+    addThread,
     currentChannelId,
   } = useAppStore();
+  const [creating, setCreating] = useState(false);
 
   const [search, setSearch] = useState('');
 
@@ -62,10 +64,19 @@ export function CommandPalette() {
     setCommandPaletteOpen(false);
   };
 
-  const handleNewThread = () => {
-    if (currentChannelId) {
-      createThread(currentChannelId);
+  const handleNewThread = async () => {
+    if (!currentWorkspaceId || !currentChannelId) return;
+    setCreating(true);
+    try {
+      const thread = await createThreadInSupabase(
+        currentWorkspaceId,
+        currentChannelId,
+        'Untitled thread'
+      );
+      addThread(thread);
       setCommandPaletteOpen(false);
+    } finally {
+      setCreating(false);
     }
   };
 
@@ -84,9 +95,9 @@ export function CommandPalette() {
 
         {/* Quick Actions */}
         <CommandGroup heading="Quick Actions">
-          <CommandItem onSelect={handleNewThread}>
+          <CommandItem onSelect={handleNewThread} disabled={creating}>
             <Plus className="mr-2 h-4 w-4" />
-            <span>New Thread</span>
+            <span>{creating ? 'Creating…' : 'New Thread'}</span>
             <span className="ml-auto text-xs text-muted-foreground">in current channel</span>
           </CommandItem>
           <CommandItem onSelect={() => {

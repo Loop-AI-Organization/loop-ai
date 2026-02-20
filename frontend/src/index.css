@@ -129,6 +129,16 @@
   }
 }
 
+/* Login page – calm floating background animation */
+@keyframes loginBgFloat {
+  0% {
+    transform: translate(0, 0);
+  }
+  100% {
+    transform: translate(7%, -6%);
+  }
+}
+
 @layer base {
   * {
     @apply border-border;

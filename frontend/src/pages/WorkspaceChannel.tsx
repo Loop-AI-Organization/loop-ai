@@ -5,26 +5,47 @@ import { AppShell } from '@/components/app-shell';
 
 export default function WorkspaceChannel() {
   const { workspaceId, channelId } = useParams<{ workspaceId: string; channelId: string }>();
-  const { setCurrentWorkspace, setCurrentChannel, workspaces, channels } = useAppStore();
+  const {
+    currentWorkspaceId,
+    currentChannelId,
+    setCurrentWorkspace,
+    setCurrentChannel,
+    workspaces,
+    channels,
+    dataLoading,
+  } = useAppStore();
   const navigate = useNavigate();
 
   useEffect(() => {
-    // Validate and set workspace
-    const workspace = workspaces.find(w => w.id === workspaceId);
+    if (dataLoading || !workspaceId || !channelId) return;
+    const workspace = workspaces.find((w) => w.id === workspaceId);
     if (!workspace) {
-      navigate('/app');
+      navigate('/app', { replace: true });
       return;
     }
-    setCurrentWorkspace(workspaceId!);
-
-    // Validate and set channel
-    const channel = channels.find(c => c.id === channelId && c.workspaceId === workspaceId);
+    if (currentWorkspaceId !== workspaceId) {
+      setCurrentWorkspace(workspaceId);
+    }
+    const channel = channels.find((c) => c.id === channelId && c.workspaceId === workspaceId);
     if (!channel) {
-      navigate('/app');
+      navigate('/app', { replace: true });
       return;
     }
-    setCurrentChannel(channelId!);
-  }, [workspaceId, channelId, setCurrentWorkspace, setCurrentChannel, workspaces, channels, navigate]);
+    if (currentChannelId !== channelId) {
+      setCurrentChannel(channelId);
+    }
+  }, [
+    workspaceId,
+    channelId,
+    dataLoading,
+    workspaces,
+    channels,
+    currentWorkspaceId,
+    currentChannelId,
+    setCurrentWorkspace,
+    setCurrentChannel,
+    navigate,
+  ]);
 
   return <AppShell />;
 }

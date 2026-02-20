@@ -1,30 +1,42 @@
+import { useState } from 'react';
 import { Search, Plus, PanelRightClose, PanelRightOpen, Menu, ChevronRight } from 'lucide-react';
 import { useAppStore } from '@/store/app-store';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { createThread as createThreadInSupabase } from '@/lib/supabase-data';
 
 export function ChatHeader() {
-  const { 
-    workspaces, 
-    channels, 
+  const {
+    workspaces,
+    channels,
     threads,
-    currentWorkspaceId, 
-    currentChannelId, 
+    currentWorkspaceId,
+    currentChannelId,
     currentThreadId,
     isInspectorOpen,
     toggleInspector,
     toggleSidebar,
     setCommandPaletteOpen,
-    createThread,
+    addThread,
   } = useAppStore();
+  const [creating, setCreating] = useState(false);
 
-  const currentWorkspace = workspaces.find(w => w.id === currentWorkspaceId);
-  const currentChannel = channels.find(c => c.id === currentChannelId);
-  const currentThread = threads.find(t => t.id === currentThreadId);
+  const currentWorkspace = workspaces.find((w) => w.id === currentWorkspaceId);
+  const currentChannel = channels.find((c) => c.id === currentChannelId);
+  const currentThread = threads.find((t) => t.id === currentThreadId);
 
-  const handleNewThread = () => {
-    if (currentChannelId) {
-      createThread(currentChannelId);
+  const handleNewThread = async () => {
+    if (!currentWorkspaceId || !currentChannelId) return;
+    setCreating(true);
+    try {
+      const thread = await createThreadInSupabase(
+        currentWorkspaceId,
+        currentChannelId,
+        'Untitled thread'
+      );
+      addThread(thread);
+    } finally {
+      setCreating(false);
     }
   };
 
@@ -77,9 +89,10 @@ export function ChatHeader() {
           size="sm"
           className="gap-1.5"
           onClick={handleNewThread}
+          disabled={creating || !currentChannelId}
         >
           <Plus className="w-4 h-4" />
-          <span className="hidden sm:inline">New thread</span>
+          <span className="hidden sm:inline">{creating ? 'Creating…' : 'New thread'}</span>
         </Button>
 
         {/* Toggle Inspector */}
