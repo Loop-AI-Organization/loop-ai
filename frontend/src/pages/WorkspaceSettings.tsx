@@ -24,7 +24,6 @@ export default function WorkspaceSettings() {
   const [deleting, setDeleting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [name, setName] = useState('');
-  const [icon, setIcon] = useState('');
   const [members, setMembers] = useState<WorkspaceMember[]>([]);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteEmail, setInviteEmail] = useState('');
@@ -48,9 +47,8 @@ export default function WorkspaceSettings() {
   useEffect(() => {
     if (workspace) {
       setName(workspace.name);
-      setIcon(workspace.icon);
     }
-  }, [workspace?.id, workspace?.name, workspace?.icon]);
+  }, [workspace?.id, workspace?.name]);
 
   useEffect(() => {
     if (!workspaceId) return;
@@ -88,8 +86,8 @@ export default function WorkspaceSettings() {
     if (!workspaceId || !workspace) return;
     setSaving(true);
     try {
-      const updated = await updateWorkspace(workspaceId, { name, icon });
-      setWorkspaces(workspaces.map(w => w.id === workspaceId ? { ...w, name: updated.name, icon: updated.icon } : w));
+      const updated = await updateWorkspace(workspaceId, { name });
+      setWorkspaces(workspaces.map(w => w.id === workspaceId ? { ...w, name: updated.name } : w));
     } finally {
       setSaving(false);
     }
@@ -166,27 +164,11 @@ export default function WorkspaceSettings() {
       <main className="max-w-2xl mx-auto p-6 space-y-8">
         {/* General */}
         <section className="space-y-4">
-          <h2 className="text-lg font-medium">General</h2>
-          <div className="space-y-4 p-4 rounded-lg border border-border">
+          <h2 className="text-lg font-semibold">General</h2>
+          <div className="space-y-4 p-5 rounded-lg border border-border">
             <div className="space-y-2">
               <Label>Workspace name</Label>
-              <Input value={name} onChange={(e) => setName(e.target.value)} />
-            </div>
-            <div className="space-y-2">
-              <Label>Workspace icon</Label>
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-lg bg-primary flex items-center justify-center text-xl font-semibold text-primary-foreground">
-                  {icon || '◎'}
-                </div>
-                <Input
-                  className="w-20 text-center text-lg"
-                  value={icon}
-                  onChange={(e) => setIcon(e.target.value)}
-                  placeholder="◎"
-                  maxLength={2}
-                />
-                <Button variant="outline" size="sm" onClick={() => setIcon('◎')}>Reset</Button>
-              </div>
+              <Input value={name} onChange={(e) => setName(e.target.value)} className="w-full" />
             </div>
             <Button onClick={handleSaveGeneral} disabled={saving}>
               {saving ? 'Saving…' : 'Save'}
@@ -199,27 +181,27 @@ export default function WorkspaceSettings() {
         {/* Members */}
         <section className="space-y-4">
           <div className="flex items-center justify-between">
-            <h2 className="text-lg font-medium">Members</h2>
+            <h2 className="text-lg font-semibold">Members</h2>
             <Button variant="outline" size="sm" className="gap-1.5" onClick={() => { setInviteOpen(true); setInviteError(null); setInviteSuccess(null); setInviteEmail(''); }}>
               <Users className="w-4 h-4" />
               Invite
             </Button>
           </div>
-          <div className="p-4 rounded-lg border border-border space-y-3">
+          <div className="p-5 rounded-lg border border-border space-y-4">
             {members.length === 0 ? (
               <p className="text-sm text-muted-foreground">No members yet.</p>
             ) : (
-              members.map((m) => (
-                <div key={m.id} className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-full bg-muted flex items-center justify-center text-sm font-medium">
-                    {m.userId.slice(0, 2).toUpperCase()}
+              <div className="space-y-3">
+                {members.map((m) => (
+                  <div key={m.id} className="grid grid-cols-[auto_1fr_auto] gap-3 items-center">
+                    <div className="w-9 h-9 rounded-full bg-muted flex items-center justify-center text-sm font-medium shrink-0">
+                      {m.userId.slice(0, 2).toUpperCase()}
+                    </div>
+                    <p className="text-sm font-medium truncate min-w-0">{m.email ?? m.userId}</p>
+                    <span className="text-xs text-muted-foreground bg-muted px-2 py-1 rounded capitalize shrink-0">{m.role}</span>
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate">{m.email ?? m.userId}</p>
-                  </div>
-                  <span className="text-xs text-muted-foreground bg-muted px-2 py-1 rounded capitalize">{m.role}</span>
-                </div>
-              ))
+                ))}
+              </div>
             )}
           </div>
         </section>
@@ -255,22 +237,22 @@ export default function WorkspaceSettings() {
 
         {/* Privacy */}
         <section className="space-y-4">
-          <h2 className="text-lg font-medium">Privacy</h2>
-          <div className="space-y-4 p-4 rounded-lg border border-border">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <Globe className="w-5 h-5 text-muted-foreground" />
-                <div>
+          <h2 className="text-lg font-semibold">Privacy</h2>
+          <div className="space-y-4 p-5 rounded-lg border border-border">
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex items-center gap-3 min-w-0">
+                <Globe className="w-5 h-5 text-muted-foreground shrink-0" />
+                <div className="min-w-0">
                   <Label>Public workspace</Label>
                   <p className="text-xs text-muted-foreground">Anyone can join</p>
                 </div>
               </div>
               <Switch />
             </div>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <Lock className="w-5 h-5 text-muted-foreground" />
-                <div>
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex items-center gap-3 min-w-0">
+                <Lock className="w-5 h-5 text-muted-foreground shrink-0" />
+                <div className="min-w-0">
                   <Label>Require approval</Label>
                   <p className="text-xs text-muted-foreground">New members need approval</p>
                 </div>
@@ -284,10 +266,10 @@ export default function WorkspaceSettings() {
 
         {/* Danger Zone */}
         <section className="space-y-4">
-          <h2 className="text-lg font-medium text-destructive">Danger Zone</h2>
-          <div className="p-4 rounded-lg border border-destructive/30 bg-destructive/5">
-            <div className="flex items-center justify-between">
-              <div>
+          <h2 className="text-lg font-semibold text-destructive">Danger Zone</h2>
+          <div className="p-5 rounded-lg border border-destructive/30 bg-destructive/5">
+            <div className="flex items-center justify-between gap-4">
+              <div className="min-w-0">
                 <p className="text-sm font-medium">Delete workspace</p>
                 <p className="text-xs text-muted-foreground">
                   This action cannot be undone
@@ -296,7 +278,7 @@ export default function WorkspaceSettings() {
               <Button
                 variant="destructive"
                 size="sm"
-                className="gap-1.5"
+                className="gap-1.5 shrink-0"
                 onClick={handleDeleteWorkspace}
                 disabled={deleting}
               >

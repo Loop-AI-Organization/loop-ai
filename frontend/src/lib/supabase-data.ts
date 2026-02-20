@@ -445,7 +445,7 @@ export async function ensureDefaultWorkspaceAndChannel(): Promise<{ workspace: W
     const channel = await createChannel(workspaces[0].id, 'general');
     return { workspace: workspaces[0], channel };
   }
-  const workspace = await createWorkspace({ name: 'My Workspace', icon: '◎' });
+  const workspace = await createWorkspace({ name: 'My Workspace' });
   const channel = await createChannel(workspace.id, 'general');
   return { workspace, channel };
 }

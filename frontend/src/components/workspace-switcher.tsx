@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ChevronDown, Plus, Settings } from 'lucide-react';
+import { ChevronDown, LayoutGrid, Plus } from 'lucide-react';
 import { useAppStore } from '@/store/app-store';
 import {
   DropdownMenu,
@@ -55,7 +55,7 @@ export function WorkspaceSwitcher() {
     if (creating) return;
     setCreating(true);
     try {
-      const workspace = await createWorkspace({ name: 'New Workspace', icon: '◎' });
+      const workspace = await createWorkspace({ name: 'New Workspace' });
       const channel = await createChannel(workspace.id, 'general');
       setWorkspaces([...workspaces, workspace]);
       setChannels([channel]);
@@ -78,11 +78,9 @@ export function WorkspaceSwitcher() {
           className="w-full justify-between px-3 py-2 h-auto hover:bg-sidebar-accent"
         >
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-md bg-primary flex items-center justify-center text-primary-foreground font-semibold text-sm">
-              {currentWorkspace?.icon || '◎'}
-            </div>
-            <div className="text-left">
-              <div className="font-medium text-sm text-sidebar-foreground">
+            <LayoutGrid className="w-5 h-5 text-muted-foreground shrink-0" />
+            <div className="text-left min-w-0">
+              <div className="font-medium text-sm text-sidebar-foreground truncate">
                 {currentWorkspace?.name || 'Select Workspace'}
               </div>
               <div className="text-2xs text-text-tertiary">
@@ -101,21 +99,9 @@ export function WorkspaceSwitcher() {
             disabled={switching}
             className="flex items-center gap-3 py-2"
           >
-            <div className="w-7 h-7 rounded-md bg-primary flex items-center justify-center text-primary-foreground font-semibold text-xs">
-              {workspace.icon}
-            </div>
             <span className="font-medium">{workspace.name}</span>
           </DropdownMenuItem>
         ))}
-        {currentWorkspaceId && (
-          <DropdownMenuItem
-            className="flex items-center gap-3 py-2 text-muted-foreground"
-            onSelect={() => navigate(`/app/${currentWorkspaceId}/settings`)}
-          >
-            <Settings className="w-3.5 h-3.5" />
-            <span>Workspace settings</span>
-          </DropdownMenuItem>
-        )}
         <DropdownMenuItem
           className="flex items-center gap-3 py-2 text-muted-foreground"
           onSelect={() => void handleNewWorkspace()}

@@ -90,6 +90,15 @@ export function ChannelList() {
     }
   };
 
+  const handleSelectChannel = (channelId: string) => {
+    if (channelId === currentChannelId || !currentWorkspaceId) return;
+    setThreads([]);
+    setMessages([]);
+    setCurrentThread(null);
+    setCurrentChannel(channelId);
+    navigate(`/app/${currentWorkspaceId}/${channelId}`);
+  };
+
   const handleDmInviteByEmail = async () => {
     if (!currentWorkspaceId || !dmInviteEmail.trim()) return;
     setDmInviting(true);
@@ -131,7 +140,7 @@ export function ChannelList() {
           <ChannelGroup
             channels={projectChannels}
             currentChannelId={currentChannelId}
-            onSelect={setCurrentChannel}
+            onSelect={handleSelectChannel}
             icon={Hash}
           />
           <div className="px-3 py-1">
@@ -156,7 +165,7 @@ export function ChannelList() {
           <ChannelGroup
             channels={dmChannels}
             currentChannelId={currentChannelId}
-            onSelect={setCurrentChannel}
+            onSelect={handleSelectChannel}
             icon={MessageCircle}
             showAvatar
           />

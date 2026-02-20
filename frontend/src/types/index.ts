@@ -3,7 +3,7 @@
 export interface Workspace {
   id: string;
   name: string;
-  icon: string;
+  icon?: string;
 }
 
 export interface WorkspaceMember {

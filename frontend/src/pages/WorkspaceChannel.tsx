@@ -27,8 +27,12 @@ export default function WorkspaceChannel() {
       setCurrentWorkspace(workspaceId);
     }
     const channel = channels.find((c) => c.id === channelId && c.workspaceId === workspaceId);
+    const channelsForWorkspace = channels.filter((c) => c.workspaceId === workspaceId);
     if (!channel) {
-      navigate('/app', { replace: true });
+      if (channelsForWorkspace.length > 0) {
+        navigate('/app', { replace: true });
+        return;
+      }
       return;
     }
     if (currentChannelId !== channelId) {

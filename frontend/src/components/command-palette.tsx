@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Search, Hash, MessageSquare, Plus, ArrowRight } from 'lucide-react';
 import { useAppStore } from '@/store/app-store';
 import { createThread as createThreadInSupabase } from '@/lib/supabase-data';
@@ -24,6 +25,7 @@ export function CommandPalette() {
     addThread,
     currentChannelId,
   } = useAppStore();
+  const navigate = useNavigate();
   const [creating, setCreating] = useState(false);
 
   const [search, setSearch] = useState('');
@@ -57,6 +59,9 @@ export function CommandPalette() {
   const handleChannelSelect = (channelId: string) => {
     setCurrentChannel(channelId);
     setCommandPaletteOpen(false);
+    if (currentWorkspaceId) {
+      navigate(`/app/${currentWorkspaceId}/${channelId}`);
+    }
   };
 
   const handleThreadSelect = (threadId: string) => {
