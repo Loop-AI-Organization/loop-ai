@@ -14,7 +14,7 @@ os.chdir(REPO_ROOT)
 sys.path.insert(0, str(REPO_ROOT / "backend"))
 
 from dotenv import load_dotenv
-load_dotenv(REPO_ROOT / ".env")
+load_dotenv(REPO_ROOT / "backend" / ".env")
 
 from supabase import create_client
 
