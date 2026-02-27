@@ -136,8 +136,8 @@ export function Composer() {
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    // Cmd/Ctrl + Enter to send
-    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+    // Enter sends; Shift+Enter keeps newline behavior.
+    if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSubmit();
     }
@@ -161,7 +161,7 @@ export function Composer() {
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Type your message... (Cmd+Enter to send)"
+          placeholder="Type your message... (Enter to send, Shift+Enter for newline)"
           className="min-h-[44px] max-h-[200px] border-0 bg-transparent resize-none focus-visible:ring-0 focus-visible:ring-offset-0 pr-24"
           disabled={orchestratorStatus !== 'ready'}
         />
