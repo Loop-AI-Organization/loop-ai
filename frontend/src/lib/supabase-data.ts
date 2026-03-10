@@ -544,11 +544,21 @@ export async function ensureDefaultWorkspaceAndChannel(): Promise<{ workspace: W
 
 // --- AI triage & auto-response for group chat ---
 
+export interface NavigationResult {
+  channelId: string;
+  workspaceId: string;
+  channelName?: string;
+  workspaceName?: string;
+  confidence?: 'high' | 'medium' | 'low';
+  reason?: string;
+}
+
 export interface TriageResult {
   shouldRespond: boolean;
   messageId?: string;
   content?: string;
   reason?: string;
+  navigation?: NavigationResult;
 }
 
 /**
@@ -571,10 +581,21 @@ export async function triageAndRespond(
     throw new Error(body.detail ?? body.message ?? `Triage failed (${res.status})`);
   }
   const data = await res.json();
+  const nav = data.navigation;
   return {
     shouldRespond: data.should_respond === true,
     messageId: data.message_id,
     content: data.content,
     reason: data.reason,
+    navigation: nav
+      ? {
+          channelId: nav.channel_id,
+          workspaceId: nav.workspace_id,
+          channelName: nav.channel_name,
+          workspaceName: nav.workspace_name,
+          confidence: nav.confidence,
+          reason: nav.reason,
+        }
+      : undefined,
   };
 }

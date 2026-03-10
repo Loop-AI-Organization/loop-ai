@@ -130,9 +130,12 @@ export function useAppData() {
           useAppStore.setState({ currentChannelId: null, currentThreadId: null });
           return;
         }
-        // Keep current channel if it's in this workspace; otherwise use first
-        const keepChannel = currentChannelId && channels.some((c) => c.id === currentChannelId);
-        const channelId = keepChannel ? currentChannelId! : firstChannelId;
+        // Keep current channel if it's in this workspace; otherwise use first.
+        // Read latest store state here (instead of closed-over value) so explicit
+        // navigation actions are not overwritten by this effect.
+        const latestChannelId = useAppStore.getState().currentChannelId;
+        const keepChannel = latestChannelId && channels.some((c) => c.id === latestChannelId);
+        const channelId = keepChannel ? latestChannelId! : firstChannelId;
         if (!keepChannel) setCurrentChannel(channelId);
 
         const threads = await fetchThreads(channelId);
