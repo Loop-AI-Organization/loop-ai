@@ -9,6 +9,15 @@ import {
   fetchMessages,
 } from '@/lib/supabase-data';
 import type { User } from '@/types';
+import type { RealtimePostgresChangesPayload } from '@supabase/supabase-js';
+
+interface MessageRow {
+  id: string;
+  thread_id: string;
+  role: 'user' | 'assistant' | 'system' | 'tool';
+  content: string;
+  created_at: string;
+}
 
 function authUserToUser(user: { id: string; email?: string; user_metadata?: { full_name?: string } } | null): User | null {
   if (!user) return null;
@@ -17,6 +26,16 @@ function authUserToUser(user: { id: string; email?: string; user_metadata?: { fu
     name: user.user_metadata?.full_name ?? user.email?.split('@')[0] ?? 'User',
     email: user.email ?? '',
     status: 'online',
+  };
+}
+
+function rowToMessage(r: MessageRow) {
+  return {
+    id: r.id,
+    threadId: r.thread_id,
+    role: r.role,
+    content: r.content,
+    createdAt: new Date(r.created_at),
   };
 }
 
@@ -219,6 +238,69 @@ export function useAppData() {
       cancelled = true;
     };
   }, [currentThreadId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Realtime: keep current thread messages in sync without page reload
+  useEffect(() => {
+    if (!initialLoadDone.current || !currentThreadId) return;
+    const supabase = getSupabase();
+    const channel = supabase
+      .channel(`messages:thread:${currentThreadId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'messages',
+          filter: `thread_id=eq.${currentThreadId}`,
+        },
+        (payload: RealtimePostgresChangesPayload<MessageRow>) => {
+          const next = payload.new;
+          if (!next?.id) return;
+          const state = useAppStore.getState();
+          if (state.messages.some((m) => m.id === next.id)) return; // dedupe local + realtime echo
+          state.addMessage(rowToMessage(next));
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'messages',
+          filter: `thread_id=eq.${currentThreadId}`,
+        },
+        (payload: RealtimePostgresChangesPayload<MessageRow>) => {
+          const next = payload.new;
+          if (!next?.id) return;
+          useAppStore.getState().updateMessage(next.id, {
+            role: next.role,
+            content: next.content,
+            createdAt: new Date(next.created_at),
+          });
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'DELETE',
+          schema: 'public',
+          table: 'messages',
+          filter: `thread_id=eq.${currentThreadId}`,
+        },
+        (payload: RealtimePostgresChangesPayload<MessageRow>) => {
+          const oldRow = payload.old as Partial<MessageRow> | null;
+          if (!oldRow?.id) return;
+          useAppStore.setState((state) => ({
+            messages: state.messages.filter((m) => m.id !== oldRow.id),
+          }));
+        }
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [currentThreadId]);
 
   return { dataLoading, dataError };
 }

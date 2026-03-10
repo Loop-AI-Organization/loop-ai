@@ -39,6 +39,8 @@ export interface Message {
   role: 'user' | 'assistant' | 'system' | 'tool';
   content: string;
   createdAt: Date;
+  userId?: string | null;
+  userDisplayName?: string | null;
   isStreaming?: boolean;
 }
 

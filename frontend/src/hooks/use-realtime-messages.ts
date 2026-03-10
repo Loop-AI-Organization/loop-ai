@@ -8,6 +8,8 @@ interface MessageRow {
   thread_id: string;
   role: string;
   content: string;
+  user_id?: string | null;
+  user_display_name?: string | null;
   created_at: string;
 }
 
@@ -40,6 +42,8 @@ export function useRealtimeMessages() {
             role: row.role as Message['role'],
             content: row.content,
             createdAt: new Date(row.created_at),
+            userId: row.user_id ?? null,
+            userDisplayName: row.user_display_name ?? null,
           };
           addMessage(msg);
         }
