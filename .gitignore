@@ -59,6 +59,9 @@ htmlcov/
 .mypy_cache/
 .ruff_cache/
 
+# Vercel local project link (per-developer)
+.vercel/
+
 # Local runtime files
 .python-version
 instance/

@@ -1,0 +1,35 @@
+version: "3.9"
+
+services:
+  api:
+    build: .
+    env_file:
+      - .env
+    environment:
+      # Use the internal Redis service instead of localhost
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - redis
+    ports:
+      # Expose the API on the host; frontends / reverse proxies hit this.
+      - "4000:4000"
+
+  worker:
+    build: .
+    command: python worker.py
+    env_file:
+      - .env
+    environment:
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - redis
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+
+volumes:
+  redis_data:
+
