@@ -20,9 +20,9 @@ export const channels: Channel[] = [
   // Project channels
   { id: 'ch-1', workspaceId: 'ws-1', name: 'product-roadmap', type: 'project', unreadCount: 3, lastMessage: 'New feature prioritization complete' },
   { id: 'ch-2', workspaceId: 'ws-1', name: 'engineering', type: 'project', unreadCount: 0, lastMessage: 'API refactor merged' },
-  // DMs
-  { id: 'ch-3', workspaceId: 'ws-1', name: 'Sarah Kim', type: 'dm', unreadCount: 1, avatar: 'SK' },
-  { id: 'ch-4', workspaceId: 'ws-1', name: 'Marcus Lee', type: 'dm', unreadCount: 0, avatar: 'ML' },
+  // Additional project-style channels (no explicit DMs in demo)
+  { id: 'ch-3', workspaceId: 'ws-1', name: 'design-review', type: 'project', unreadCount: 1, avatar: 'DR' },
+  { id: 'ch-4', workspaceId: 'ws-1', name: 'marketing', type: 'project', unreadCount: 0, avatar: 'MK' },
 ];
 
 // Threads

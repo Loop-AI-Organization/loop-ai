@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Hash, MessageCircle, Pin, Plus } from 'lucide-react';
+import { Hash, Pin, Plus } from 'lucide-react';
 import { useAppStore } from '@/store/app-store';
 import { cn } from '@/lib/utils';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -14,22 +14,13 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { createChannel, fetchWorkspaceMembers, createDmChannel, addWorkspaceMemberByEmail } from '@/lib/supabase-data';
-import { getSupabase } from '@/lib/supabase';
-import type { WorkspaceMember } from '@/types';
+import { createChannel } from '@/lib/supabase-data';
 
 export function ChannelList() {
   const navigate = useNavigate();
   const [newChannelOpen, setNewChannelOpen] = useState(false);
-  const [newDmOpen, setNewDmOpen] = useState(false);
   const [newChannelName, setNewChannelName] = useState('');
   const [creating, setCreating] = useState(false);
-  const [dmMembers, setDmMembers] = useState<WorkspaceMember[]>([]);
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
-  const [dmInviteEmail, setDmInviteEmail] = useState('');
-  const [dmInviteError, setDmInviteError] = useState<string | null>(null);
-  const [dmInviteSuccess, setDmInviteSuccess] = useState<string | null>(null);
-  const [dmInviting, setDmInviting] = useState(false);
   const {
     channels,
     currentWorkspaceId,
@@ -41,9 +32,8 @@ export function ChannelList() {
     setCurrentThread,
   } = useAppStore();
 
-  const workspaceChannels = channels.filter(c => c.workspaceId === currentWorkspaceId);
-  const projectChannels = workspaceChannels.filter(c => c.type === 'project');
-  const dmChannels = workspaceChannels.filter(c => c.type === 'dm');
+  const workspaceChannels = channels.filter((c) => c.workspaceId === currentWorkspaceId);
+  const projectChannels = workspaceChannels.filter((c) => c.type === 'project');
 
   const handleCreateChannel = async () => {
     if (!currentWorkspaceId || !newChannelName.trim()) return;
@@ -63,33 +53,6 @@ export function ChannelList() {
     }
   };
 
-  const handleOpenNewDm = () => {
-    setNewDmOpen(true);
-    if (!currentWorkspaceId) return;
-    getSupabase().auth.getUser().then(({ data: { user } }) => {
-      if (user) setCurrentUserId(user.id);
-    });
-    fetchWorkspaceMembers(currentWorkspaceId).then((list) => setDmMembers(list)).catch(() => setDmMembers([]));
-  };
-
-  const handleCreateDm = async (otherUserId: string) => {
-    if (!currentWorkspaceId) return;
-    setCreating(true);
-    try {
-      const channel = await createDmChannel(currentWorkspaceId, otherUserId);
-      const exists = channels.some(c => c.id === channel.id);
-      if (!exists) setChannels([...channels, channel]);
-      setCurrentChannel(channel.id);
-      setThreads([]);
-      setMessages([]);
-      setCurrentThread(null);
-      navigate(`/app/${currentWorkspaceId}/${channel.id}`);
-      setNewDmOpen(false);
-    } finally {
-      setCreating(false);
-    }
-  };
-
   const handleSelectChannel = (channelId: string) => {
     if (channelId === currentChannelId || !currentWorkspaceId) return;
     setThreads([]);
@@ -97,36 +60,6 @@ export function ChannelList() {
     setCurrentThread(null);
     setCurrentChannel(channelId);
     navigate(`/app/${currentWorkspaceId}/${channelId}`);
-  };
-
-  const handleDmInviteByEmail = async () => {
-    if (!currentWorkspaceId || !dmInviteEmail.trim()) return;
-    setDmInviting(true);
-    setDmInviteError(null);
-    setDmInviteSuccess(null);
-    try {
-      const result = await addWorkspaceMemberByEmail(currentWorkspaceId, dmInviteEmail.trim());
-      if (result.userId) {
-        const channel = await createDmChannel(currentWorkspaceId, result.userId);
-        const exists = channels.some(c => c.id === channel.id);
-        if (!exists) setChannels([...channels, channel]);
-        setCurrentChannel(channel.id);
-        setThreads([]);
-        setMessages([]);
-        setCurrentThread(null);
-        navigate(`/app/${currentWorkspaceId}/${channel.id}`);
-        setNewDmOpen(false);
-        const list = await fetchWorkspaceMembers(currentWorkspaceId);
-        setDmMembers(list);
-      } else {
-        setDmInviteSuccess(result.message ?? 'Invite email sent. When they sign up, they\'ll be in the workspace and you can start a DM.');
-        setDmInviteEmail('');
-      }
-    } catch (e) {
-      setDmInviteError(e instanceof Error ? e.message : 'Invite failed');
-    } finally {
-      setDmInviting(false);
-    }
   };
 
   return (
@@ -153,32 +86,6 @@ export function ChannelList() {
             >
               <Plus className="w-3.5 h-3.5" />
               Add channel
-            </Button>
-          </div>
-        </div>
-
-        {/* Direct Messages */}
-        <div>
-          <div className="flex items-center gap-2 px-4 py-1.5 text-2xs font-medium text-text-tertiary uppercase tracking-wider">
-            Direct Messages
-          </div>
-          <ChannelGroup
-            channels={dmChannels}
-            currentChannelId={currentChannelId}
-            onSelect={handleSelectChannel}
-            icon={MessageCircle}
-            showAvatar
-          />
-          <div className="px-3 py-1">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="w-full justify-start gap-2 text-muted-foreground hover:text-sidebar-foreground"
-              onClick={handleOpenNewDm}
-              disabled={!currentWorkspaceId}
-            >
-              <Plus className="w-3.5 h-3.5" />
-              New DM
             </Button>
           </div>
         </div>
@@ -216,60 +123,6 @@ export function ChannelList() {
             </Button>
             <Button onClick={handleCreateChannel} disabled={creating || !newChannelName.trim()}>
               {creating ? 'Creating…' : 'Create'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* New DM dialog - pick a workspace member or invite by email */}
-      <Dialog open={newDmOpen} onOpenChange={(open) => { setNewDmOpen(open); if (!open) { setDmInviteEmail(''); setDmInviteError(null); setDmInviteSuccess(null); } }}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>New DM</DialogTitle>
-          </DialogHeader>
-          <p className="text-sm text-muted-foreground">Choose a workspace member to start a direct message, or invite by email.</p>
-          <div className="max-h-48 overflow-auto space-y-1">
-            {dmMembers
-              .filter((m) => m.userId !== currentUserId)
-              .map((m) => (
-                <button
-                  key={m.id}
-                  type="button"
-                  disabled={creating}
-                  onClick={() => void handleCreateDm(m.userId)}
-                  className="w-full flex items-center gap-3 px-3 py-2 rounded-md text-left text-sm hover:bg-sidebar-accent transition-colors"
-                >
-                  <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center text-xs font-medium">
-                    {m.userId.slice(0, 2).toUpperCase()}
-                  </div>
-                  <span className="truncate">{m.email ?? m.userId}</span>
-                </button>
-              ))}
-            {currentUserId && dmMembers.filter((m) => m.userId !== currentUserId).length === 0 && (
-              <p className="text-sm text-muted-foreground py-2">No other members in this workspace.</p>
-            )}
-          </div>
-          <div className="space-y-2 border-t border-border pt-3">
-            <Label className="text-xs text-muted-foreground">Invite by email</Label>
-            <div className="flex gap-2">
-              <Input
-                type="email"
-                value={dmInviteEmail}
-                onChange={(e) => setDmInviteEmail(e.target.value)}
-                placeholder="email@example.com"
-                onKeyDown={(e) => e.key === 'Enter' && handleDmInviteByEmail()}
-                className="flex-1"
-              />
-              <Button size="sm" onClick={() => void handleDmInviteByEmail()} disabled={dmInviting || !dmInviteEmail.trim()}>
-                {dmInviting ? 'Inviting…' : 'Invite'}
-              </Button>
-            </div>
-            {dmInviteError && <p className="text-sm text-destructive">{dmInviteError}</p>}
-            {dmInviteSuccess && <p className="text-sm text-green-600 dark:text-green-400">{dmInviteSuccess}</p>}
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setNewDmOpen(false)}>
-              Cancel
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -324,3 +177,4 @@ function ChannelGroup({ channels, currentChannelId, onSelect, icon: Icon, showAv
     </div>
   );
 }
+
