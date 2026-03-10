@@ -1,6 +1,8 @@
 from typing import Annotated, Optional, List
 import asyncio
 import json
+import random
+import string
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
@@ -15,6 +17,15 @@ router = APIRouter()
 
 class InviteMemberRequest(BaseModel):
     email: str
+
+
+class WorkspaceShareCodeResponse(BaseModel):
+    workspace_id: str
+    share_code: str
+
+
+class JoinByCodeRequest(BaseModel):
+    code: str
 
 class SignedUploadRequest(BaseModel):
     path: str
@@ -45,6 +56,21 @@ async def signed_upload(
 
 class LogEventRequest(BaseModel):
     event_type: str = "sign_in"
+
+
+def _generate_share_code(length: int = 8) -> str:
+    alphabet = string.ascii_uppercase + string.digits
+    return "".join(random.choice(alphabet) for _ in range(length))
+
+
+def _create_unique_share_code() -> str:
+    # Try a few times to avoid extremely unlikely collisions
+    for _ in range(10):
+        code = _generate_share_code()
+        res = supabase.table("workspaces").select("id").eq("share_code", code).execute()
+        if not res.data:
+            return code
+    raise HTTPException(status_code=500, detail="Failed to generate unique workspace share code")
 
 
 @router.post("/api/workspaces/{workspace_id}/members/invite")
@@ -161,6 +187,105 @@ async def accept_workspace_invite(
             return {"ok": True, "already_member": True}
         raise HTTPException(status_code=400, detail=err)
     return {"ok": True, "already_member": False}
+
+
+@router.post("/api/workspaces/{workspace_id}/share-code", response_model=WorkspaceShareCodeResponse)
+async def get_or_create_workspace_share_code(
+    workspace_id: str,
+    user: Annotated[dict, Depends(get_current_user)],
+):
+    """Get the existing share code for a workspace or create one if missing."""
+    uid = user.get("sub")
+    if not uid:
+        raise HTTPException(status_code=401, detail="Invalid user")
+
+    # Check caller is in workspace (owner or member)
+    ws = supabase.table("workspaces").select("id, user_id, name, share_code").eq("id", workspace_id).execute()
+    if not ws.data or len(ws.data) == 0:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+    workspace_row = ws.data[0]
+    owner_id = workspace_row.get("user_id")
+    if owner_id != uid:
+        members = (
+            supabase.table("workspace_members")
+            .select("user_id")
+            .eq("workspace_id", workspace_id)
+            .eq("user_id", uid)
+            .execute()
+        )
+        if not members.data or len(members.data) == 0:
+            raise HTTPException(status_code=403, detail="Not a member of this workspace")
+
+    code = (workspace_row.get("share_code") or "").strip()
+    if not code:
+        code = _create_unique_share_code()
+        supabase.table("workspaces").update({"share_code": code}).eq("id", workspace_id).execute()
+
+    return WorkspaceShareCodeResponse(workspace_id=workspace_id, share_code=code)
+
+
+@router.post("/api/workspaces/{workspace_id}/share-code/rotate", response_model=WorkspaceShareCodeResponse)
+async def rotate_workspace_share_code(
+    workspace_id: str,
+    user: Annotated[dict, Depends(get_current_user)],
+):
+    """Rotate a workspace's share code. Only the owner may rotate."""
+    uid = user.get("sub")
+    if not uid:
+        raise HTTPException(status_code=401, detail="Invalid user")
+
+    ws = supabase.table("workspaces").select("id, user_id, share_code").eq("id", workspace_id).execute()
+    if not ws.data or len(ws.data) == 0:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+    workspace_row = ws.data[0]
+    owner_id = workspace_row.get("user_id")
+    if owner_id != uid:
+        raise HTTPException(status_code=403, detail="Only the workspace owner can rotate the share code")
+
+    code = _create_unique_share_code()
+    supabase.table("workspaces").update({"share_code": code}).eq("id", workspace_id).execute()
+    return WorkspaceShareCodeResponse(workspace_id=workspace_id, share_code=code)
+
+
+@router.post("/api/workspaces/join-by-code")
+async def join_workspace_by_code(
+    body: JoinByCodeRequest,
+    user: Annotated[dict, Depends(get_current_user)],
+):
+    """Join a workspace using its share code."""
+    uid = user.get("sub")
+    if not uid:
+        raise HTTPException(status_code=401, detail="Invalid user")
+    code = (body.code or "").strip().upper()
+    if not code:
+        raise HTTPException(status_code=400, detail="Code is required")
+
+    ws = (
+        supabase.table("workspaces")
+        .select("id")
+        .eq("share_code", code)
+        .execute()
+    )
+    if not ws.data or len(ws.data) == 0:
+        raise HTTPException(status_code=404, detail="Workspace not found for this code")
+    workspace_row = ws.data[0]
+    workspace_id = workspace_row.get("id")
+    if not workspace_id:
+        raise HTTPException(status_code=500, detail="Workspace data is invalid")
+
+    try:
+        supabase.table("workspace_members").insert(
+            {"workspace_id": workspace_id, "user_id": uid, "role": "member"}
+        ).execute()
+        already_member = False
+    except Exception as e:
+        err = str(e)
+        if "duplicate" in err.lower() or "unique" in err.lower():
+            already_member = True
+        else:
+            raise HTTPException(status_code=400, detail=err)
+
+    return {"ok": True, "workspace_id": workspace_id, "already_member": already_member}
 
 
 @router.post("/api/auth/log-event")

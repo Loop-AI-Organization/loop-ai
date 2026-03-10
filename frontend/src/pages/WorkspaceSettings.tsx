@@ -1,6 +1,5 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useEffect } from 'react';
 import { useAppStore } from '@/store/app-store';
 import { ArrowLeft, Users, Trash2, Globe, Lock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -15,7 +14,14 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog';
-import { deleteWorkspace, fetchChannels, updateWorkspace, fetchWorkspaceMembers, addWorkspaceMemberByEmail } from '@/lib/supabase-data';
+import {
+  deleteWorkspace,
+  fetchChannels,
+  updateWorkspace,
+  fetchWorkspaceMembers,
+  getWorkspaceShareCode,
+  rotateWorkspaceShareCode,
+} from '@/lib/supabase-data';
 import type { WorkspaceMember } from '@/types';
 
 export default function WorkspaceSettings() {
@@ -25,11 +31,11 @@ export default function WorkspaceSettings() {
   const [saving, setSaving] = useState(false);
   const [name, setName] = useState('');
   const [members, setMembers] = useState<WorkspaceMember[]>([]);
-  const [inviteOpen, setInviteOpen] = useState(false);
-  const [inviteEmail, setInviteEmail] = useState('');
-  const [inviting, setInviting] = useState(false);
-  const [inviteError, setInviteError] = useState<string | null>(null);
-  const [inviteSuccess, setInviteSuccess] = useState<string | null>(null);
+  const [shareCode, setShareCode] = useState<string | null>(null);
+  const [shareLoading, setShareLoading] = useState(false);
+  const [shareError, setShareError] = useState<string | null>(null);
+  const [rotating, setRotating] = useState(false);
+  const [copied, setCopied] = useState(false);
   const {
     workspaces,
     currentWorkspaceId,
@@ -58,27 +64,50 @@ export default function WorkspaceSettings() {
     }).catch(() => {});
     return () => { cancelled = true; };
   }, [workspaceId]);
+  useEffect(() => {
+    if (!workspaceId) return;
+    let cancelled = false;
+    setShareLoading(true);
+    setShareError(null);
+    getWorkspaceShareCode(workspaceId)
+      .then((code) => {
+        if (!cancelled) setShareCode(code);
+      })
+      .catch((e) => {
+        if (!cancelled) setShareError(e instanceof Error ? e.message : 'Failed to load share code');
+      })
+      .finally(() => {
+        if (!cancelled) setShareLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceId]);
 
-  const handleInvite = async () => {
-    if (!workspaceId || !inviteEmail.trim()) return;
-    setInviting(true);
-    setInviteError(null);
-    setInviteSuccess(null);
+  const handleRotateShareCode = async () => {
+    if (!workspaceId) return;
+    if (!window.confirm('Rotate share code? The old code will stop working.')) return;
+    setRotating(true);
+    setShareError(null);
     try {
-      const result = await addWorkspaceMemberByEmail(workspaceId, inviteEmail.trim());
-      if (result.invited) {
-        setInviteSuccess(result.message ?? 'Invite email sent. When they sign up, they\'ll be added to the workspace.');
-        setInviteEmail('');
-      } else {
-        const list = await fetchWorkspaceMembers(workspaceId);
-        setMembers(list);
-        setInviteEmail('');
-        setInviteOpen(false);
-      }
+      const code = await rotateWorkspaceShareCode(workspaceId);
+      setShareCode(code);
+      setCopied(false);
     } catch (e) {
-      setInviteError(e instanceof Error ? e.message : 'Invite failed');
+      setShareError(e instanceof Error ? e.message : 'Failed to rotate share code');
     } finally {
-      setInviting(false);
+      setRotating(false);
+    }
+  };
+
+  const handleCopyShareCode = async () => {
+    if (!shareCode) return;
+    try {
+      await navigator.clipboard.writeText(shareCode);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // ignore clipboard errors
     }
   };
 
@@ -182,10 +211,6 @@ export default function WorkspaceSettings() {
         <section className="space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-semibold">Members</h2>
-            <Button variant="outline" size="sm" className="gap-1.5" onClick={() => { setInviteOpen(true); setInviteError(null); setInviteSuccess(null); setInviteEmail(''); }}>
-              <Users className="w-4 h-4" />
-              Invite
-            </Button>
           </div>
           <div className="p-5 rounded-lg border border-border space-y-4">
             {members.length === 0 ? (
@@ -206,34 +231,41 @@ export default function WorkspaceSettings() {
           </div>
         </section>
 
-        <Dialog open={inviteOpen} onOpenChange={setInviteOpen}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Invite by email</DialogTitle>
-            </DialogHeader>
-            <p className="text-sm text-muted-foreground">Enter an email to add them to this workspace. If they don&apos;t have an account, we&apos;ll send an invite to sign up.</p>
-            <div className="space-y-2">
-              <Label>Email</Label>
-              <Input
-                type="email"
-                value={inviteEmail}
-                onChange={(e) => setInviteEmail(e.target.value)}
-                placeholder="colleague@example.com"
-                onKeyDown={(e) => e.key === 'Enter' && handleInvite()}
-              />
-              {inviteError && <p className="text-sm text-destructive">{inviteError}</p>}
-              {inviteSuccess && <p className="text-sm text-green-600 dark:text-green-400">{inviteSuccess}</p>}
-            </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setInviteOpen(false)}>Cancel</Button>
-              <Button onClick={() => void handleInvite()} disabled={inviting || !inviteEmail.trim()}>
-                {inviting ? 'Inviting…' : 'Invite'}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-
         <Separator />
+
+        {/* Share code */}
+        <section className="space-y-4">
+          <h2 className="text-lg font-semibold">Share</h2>
+          <div className="space-y-3 p-5 rounded-lg border border-border">
+            <p className="text-sm text-muted-foreground">
+              Share this code with teammates so they can join this workspace from their account.
+            </p>
+            <div className="flex items-center gap-3 flex-wrap">
+              <div className="px-3 py-1.5 rounded-md bg-muted font-mono text-sm tracking-[0.2em] min-w-[7rem] text-center">
+                {shareLoading ? 'Loading…' : shareCode ?? '—'}
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleCopyShareCode}
+                  disabled={!shareCode || shareLoading}
+                >
+                  {copied ? 'Copied' : 'Copy'}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleRotateShareCode}
+                  disabled={shareLoading || rotating}
+                >
+                  {rotating ? 'Rotating…' : 'Regenerate'}
+                </Button>
+              </div>
+            </div>
+            {shareError && <p className="text-sm text-destructive">{shareError}</p>}
+          </div>
+        </section>
 
         {/* Privacy */}
         <section className="space-y-4">

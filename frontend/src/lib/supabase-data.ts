@@ -250,6 +250,54 @@ export async function acceptWorkspaceInvite(workspaceId: string): Promise<{ alre
   return { alreadyMember: data.already_member === true };
 }
 
+/** Get or create the current workspace's share code. */
+export async function getWorkspaceShareCode(workspaceId: string): Promise<string> {
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${API_URL}/api/workspaces/${workspaceId}/share-code`, {
+    method: 'POST',
+    headers,
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(body.detail ?? body.message ?? `Failed to get share code (${res.status})`);
+  }
+  return body.share_code as string;
+}
+
+/** Rotate the workspace's share code and return the new value. */
+export async function rotateWorkspaceShareCode(workspaceId: string): Promise<string> {
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${API_URL}/api/workspaces/${workspaceId}/share-code/rotate`, {
+    method: 'POST',
+    headers,
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(body.detail ?? body.message ?? `Failed to rotate share code (${res.status})`);
+  }
+  return body.share_code as string;
+}
+
+/** Join a workspace using its share code. */
+export async function joinWorkspaceByCode(
+  code: string
+): Promise<{ workspaceId: string; alreadyMember: boolean }> {
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${API_URL}/api/workspaces/join-by-code`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ code }),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(body.detail ?? body.message ?? `Join by code failed (${res.status})`);
+  }
+  return {
+    workspaceId: body.workspace_id as string,
+    alreadyMember: body.already_member === true,
+  };
+}
+
 /** Find an existing 1:1 DM channel between current user and otherUserId in this workspace. */
 export async function findExistingDm(workspaceId: string, otherUserId: string): Promise<Channel | null> {
   const supabase = getSupabase();

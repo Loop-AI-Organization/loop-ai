@@ -9,12 +9,31 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
-import { createWorkspace, createChannel, fetchChannels } from '@/lib/supabase-data';
+import {
+  createWorkspace,
+  createChannel,
+  fetchChannels,
+  fetchWorkspaces,
+  joinWorkspaceByCode,
+} from '@/lib/supabase-data';
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 
 export function WorkspaceSwitcher() {
   const navigate = useNavigate();
   const [creating, setCreating] = useState(false);
   const [switching, setSwitching] = useState(false);
+  const [joinOpen, setJoinOpen] = useState(false);
+  const [joinCode, setJoinCode] = useState('');
+  const [joining, setJoining] = useState(false);
+  const [joinError, setJoinError] = useState<string | null>(null);
   const {
     workspaces,
     currentWorkspaceId,
@@ -70,6 +89,44 @@ export function WorkspaceSwitcher() {
     }
   };
 
+  const handleJoinByCode = async () => {
+    if (joining) return;
+    const raw = joinCode.trim();
+    if (!raw) return;
+    setJoining(true);
+    setJoinError(null);
+    try {
+      const code = raw.toUpperCase();
+      const { workspaceId } = await joinWorkspaceByCode(code);
+      const allWorkspaces = await fetchWorkspaces();
+      setWorkspaces(allWorkspaces);
+      const workspace = allWorkspaces.find((w) => w.id === workspaceId);
+      if (!workspace) {
+        throw new Error('Joined workspace not found');
+      }
+      const channels = await fetchChannels(workspace.id);
+      setChannels(channels);
+      setThreads([]);
+      setMessages([]);
+      setCurrentThread(null);
+      setCurrentWorkspace(workspace.id);
+      const firstChannelId = channels[0]?.id;
+      if (firstChannelId) {
+        setCurrentChannel(firstChannelId);
+        setTimeout(() => navigate(`/app/${workspace.id}/${firstChannelId}`), 0);
+      } else {
+        useAppStore.setState({ currentChannelId: null });
+        navigate('/app');
+      }
+      setJoinOpen(false);
+      setJoinCode('');
+    } catch (e) {
+      setJoinError(e instanceof Error ? e.message : 'Failed to join workspace');
+    } finally {
+      setJoining(false);
+    }
+  };
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -112,7 +169,46 @@ export function WorkspaceSwitcher() {
           </div>
           <span>{creating ? 'Creating…' : 'New Workspace'}</span>
         </DropdownMenuItem>
+        <DropdownMenuItem
+          className="flex items-center gap-3 py-2 text-muted-foreground"
+          onSelect={() => {
+            setJoinOpen(true);
+            setJoinError(null);
+            setJoinCode('');
+          }}
+        >
+          <div className="w-7 h-7 rounded-md border border-dashed border-border flex items-center justify-center">
+            <Plus className="w-3.5 h-3.5" />
+          </div>
+          <span>Join workspace by code</span>
+        </DropdownMenuItem>
       </DropdownMenuContent>
+      <Dialog open={joinOpen} onOpenChange={setJoinOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Join workspace</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="workspace-code">Share code</Label>
+            <Input
+              id="workspace-code"
+              value={joinCode}
+              onChange={(e) => setJoinCode(e.target.value)}
+              placeholder="e.g. AB3F9K"
+              onKeyDown={(e) => e.key === 'Enter' && handleJoinByCode()}
+            />
+            {joinError && <p className="text-sm text-destructive">{joinError}</p>}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setJoinOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={() => void handleJoinByCode()} disabled={joining || !joinCode.trim()}>
+              {joining ? 'Joining…' : 'Join'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </DropdownMenu>
   );
 }
