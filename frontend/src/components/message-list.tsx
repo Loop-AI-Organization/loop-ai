@@ -24,7 +24,12 @@ export function MessageList() {
   // Auto-scroll on new messages
   useEffect(() => {
     if (scrollRef.current && !showJumpButton) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+      // Use setTimeout to allow DOM to calculate new heights before scrolling
+      setTimeout(() => {
+        if (scrollRef.current) {
+          scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+        }
+      }, 50);
     }
   }, [threadMessages.length, streamingMessageId, showJumpButton]);
 
