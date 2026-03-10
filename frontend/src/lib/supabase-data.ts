@@ -110,9 +110,15 @@ export async function createWorkspace(params: { name?: string; icon?: string }):
     .single();
   if (error) throw error;
   const workspace = toWorkspace(data as WorkspaceRow);
-  await supabase
-    .from('workspace_members')
-    .insert({ workspace_id: workspace.id, user_id: user.id, role: 'owner' });
+  // Best-effort: add owner row to workspace_members. The workspace is already
+  // owned via user_id, so a failure here is non-fatal.
+  try {
+    await supabase
+      .from('workspace_members')
+      .insert({ workspace_id: workspace.id, user_id: user.id, role: 'owner' });
+  } catch {
+    // Ignore — RLS or duplicate constraint; user still owns the workspace.
+  }
   return workspace;
 }
 
