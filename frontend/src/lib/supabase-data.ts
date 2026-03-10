@@ -458,3 +458,40 @@ export async function ensureDefaultWorkspaceAndChannel(): Promise<{ workspace: W
   const channel = await createChannel(workspace.id, 'general');
   return { workspace, channel };
 }
+
+// --- AI triage & auto-response for group chat ---
+
+export interface TriageResult {
+  shouldRespond: boolean;
+  messageId?: string;
+  content?: string;
+  reason?: string;
+}
+
+/**
+ * Call the backend triage endpoint: lightweight AI decides if the assistant should
+ * respond, and if so generates a GPT-4o reply saved directly to the thread.
+ */
+export async function triageAndRespond(
+  channelId: string,
+  threadId: string,
+  messages: Array<{ role: string; content: string }>
+): Promise<TriageResult> {
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${API_URL}/api/channels/${channelId}/triage`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ thread_id: threadId, messages }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.detail ?? body.message ?? `Triage failed (${res.status})`);
+  }
+  const data = await res.json();
+  return {
+    shouldRespond: data.should_respond === true,
+    messageId: data.message_id,
+    content: data.content,
+    reason: data.reason,
+  };
+}

@@ -19,6 +19,8 @@ def _getenv(name: str, default: str | None = None) -> str | None:
 class Settings:
     openrouter_api_key: str
     openrouter_model: str
+    openrouter_triage_model: str
+    openrouter_response_model: str
     openrouter_max_tokens: int
     openrouter_temperature: float
     openrouter_app_url: str | None
@@ -35,6 +37,8 @@ def load_settings() -> Settings:
         raise RuntimeError("Missing OPENROUTER_API_KEY")
 
     model = _getenv("OPENROUTER_MODEL") or "openai/gpt-4o-mini"
+    triage_model = _getenv("OPENROUTER_TRIAGE_MODEL") or "openai/gpt-4o-mini"
+    response_model = _getenv("OPENROUTER_RESPONSE_MODEL") or "openai/gpt-4o"
 
     max_tokens_raw = _getenv("OPENROUTER_MAX_TOKENS") or "1024"
     temperature_raw = _getenv("OPENROUTER_TEMPERATURE") or "0.7"
@@ -52,6 +56,8 @@ def load_settings() -> Settings:
     return Settings(
         openrouter_api_key=api_key,
         openrouter_model=model,
+        openrouter_triage_model=triage_model,
+        openrouter_response_model=response_model,
         openrouter_max_tokens=max_tokens,
         openrouter_temperature=temperature,
         openrouter_app_url=_getenv("OPENROUTER_APP_URL"),
