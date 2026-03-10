@@ -81,11 +81,10 @@ export function WorkspaceSwitcher() {
       setThreads([]);
       setMessages([]);
       setCurrentThread(null);
-      setCurrentWorkspace(workspace.id);
+      
       const firstChannelId = channels[0]?.id;
       if (firstChannelId) {
-        setCurrentChannel(firstChannelId);
-        setTimeout(() => navigate(`/app/${workspace.id}/${firstChannelId}`), 0);
+        navigate(`/app/${workspace.id}/${firstChannelId}`);
       } else {
         useAppStore.setState({ currentChannelId: null });
         navigate('/app');
@@ -108,11 +107,10 @@ export function WorkspaceSwitcher() {
       setThreads([]);
       setMessages([]);
       setCurrentThread(null);
-      setCurrentWorkspace(workspace.id);
-      setCurrentChannel(channel.id);
+      
       setCreateOpen(false);
       setNewName('');
-      setTimeout(() => navigate(`/app/${workspace.id}/${channel.id}`), 0);
+      navigate(`/app/${workspace.id}/${channel.id}`);
     } catch (e) {
       setCreateError(e instanceof Error ? e.message : 'Failed to create workspace');
     } finally {
@@ -157,11 +155,11 @@ export function WorkspaceSwitcher() {
         } else {
           const other = remaining[0];
           const channels = await fetchChannels(other.id);
-          setCurrentWorkspace(other.id);
+          
           setChannels(channels);
           const firstChannelId = channels[0]?.id;
           if (firstChannelId) {
-            setCurrentChannel(firstChannelId);
+            
             setCurrentThread(null);
             setThreads([]);
             setMessages([]);
@@ -192,20 +190,16 @@ export function WorkspaceSwitcher() {
     try {
       const code = raw.toUpperCase();
       const { workspace } = await joinWorkspaceByCode(code);
-      setWorkspaces(prev => {
-        const without = prev.filter(w => w.id !== workspace.id);
-        return [...without, workspace];
-      });
+      const without = workspaces.filter(w => w.id !== workspace.id);
+      setWorkspaces([...without, workspace]);
       const channels = await fetchChannels(workspace.id);
       setChannels(channels);
       setThreads([]);
       setMessages([]);
       setCurrentThread(null);
-      setCurrentWorkspace(workspace.id);
       const firstChannelId = channels[0]?.id;
       if (firstChannelId) {
-        setCurrentChannel(firstChannelId);
-        setTimeout(() => navigate(`/app/${workspace.id}/${firstChannelId}`), 0);
+        navigate(`/app/${workspace.id}/${firstChannelId}`);
       } else {
         useAppStore.setState({ currentChannelId: null });
         navigate('/app');

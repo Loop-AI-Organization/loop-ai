@@ -55,7 +55,7 @@ export function ChannelList() {
     try {
       const channel = await createChannel(currentWorkspaceId, name, 'project');
       setChannels([...channels, channel]);
-      setCurrentChannel(channel.id);
+      
       setThreads([]);
       setMessages([]);
       setCurrentThread(null);
@@ -72,7 +72,7 @@ export function ChannelList() {
     setThreads([]);
     setMessages([]);
     setCurrentThread(null);
-    setCurrentChannel(channelId);
+    
     navigate(`/app/${currentWorkspaceId}/${channelId}`);
   };
 
@@ -223,7 +223,7 @@ function ChannelGroup({ channels, currentChannelId, onSelect, icon: Icon, showAv
       const fallback = workspaceChannels.find((c) => c.name === 'general') || workspaceChannels[0];
       
       if (fallback) {
-        setCurrentChannel(fallback.id);
+        
         setThreads([]);
         setMessages([]);
         setCurrentThread(null);
@@ -233,7 +233,7 @@ function ChannelGroup({ channels, currentChannelId, onSelect, icon: Icon, showAv
         setThreads([]);
         setMessages([]);
         setCurrentThread(null);
-        navigate(`/app/${currentWorkspaceId}`);
+        navigate(`/app`);
       }
     }
     

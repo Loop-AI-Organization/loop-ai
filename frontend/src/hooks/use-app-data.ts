@@ -138,6 +138,11 @@ export function useAppData() {
     let cancelled = false;
 
     async function loadWorkspaceData() {
+      // Clear old data synchronously so UI doesn't flash stale channels
+      setChannels([]);
+      setThreads([]);
+      setMessages([]);
+      
       try {
         const channels = await fetchChannels(currentWorkspaceId!);
         if (cancelled) return;
@@ -253,8 +258,8 @@ export function useAppData() {
           table: 'messages',
           filter: `thread_id=eq.${currentThreadId}`,
         },
-        (payload: RealtimePostgresChangesPayload<MessageRow>) => {
-          const next = payload.new;
+        (payload: RealtimePostgresChangesPayload<{ [key: string]: any }>) => {
+          const next = payload.new as MessageRow;
           if (!next?.id) return;
           const state = useAppStore.getState();
           if (state.messages.some((m) => m.id === next.id)) return; // dedupe local + realtime echo
@@ -269,8 +274,8 @@ export function useAppData() {
           table: 'messages',
           filter: `thread_id=eq.${currentThreadId}`,
         },
-        (payload: RealtimePostgresChangesPayload<MessageRow>) => {
-          const next = payload.new;
+        (payload: RealtimePostgresChangesPayload<{ [key: string]: any }>) => {
+          const next = payload.new as MessageRow;
           if (!next?.id) return;
           useAppStore.getState().updateMessage(next.id, {
             role: next.role,
@@ -287,7 +292,7 @@ export function useAppData() {
           table: 'messages',
           filter: `thread_id=eq.${currentThreadId}`,
         },
-        (payload: RealtimePostgresChangesPayload<MessageRow>) => {
+        (payload: RealtimePostgresChangesPayload<{ [key: string]: any }>) => {
           const oldRow = payload.old as Partial<MessageRow> | null;
           if (!oldRow?.id) return;
           useAppStore.setState((state) => ({

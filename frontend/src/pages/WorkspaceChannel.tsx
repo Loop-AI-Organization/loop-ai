@@ -27,11 +27,11 @@ export default function WorkspaceChannel() {
       setCurrentWorkspace(workspaceId);
     }
     const channel = channels.find((c) => c.id === channelId && c.workspaceId === workspaceId);
-    const channelsForWorkspace = channels.filter((c) => c.workspaceId === workspaceId);
     if (!channel) {
-      if (channelsForWorkspace.length > 0) {
+      // If we haven't loaded channels for this workspace yet, give useAppData time to fetch them
+      const hasLoadedChannelsForWorkspace = channels.some((c) => c.workspaceId === workspaceId);
+      if (hasLoadedChannelsForWorkspace) {
         navigate('/app', { replace: true });
-        return;
       }
       return;
     }
