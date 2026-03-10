@@ -3,7 +3,7 @@
 Uses Supabase signing keys (JWKS) — no JWT secret required.
 Public keys are fetched from: https://<project>.supabase.co/auth/v1/.well-known/jwks.json
 """
-from typing import Annotated
+from typing import Annotated, Optional
 import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -19,7 +19,7 @@ def _get_jwks_uri() -> str:
 
 
 def get_current_user(
-    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security)],
+    credentials: Annotated[Optional[HTTPAuthorizationCredentials], Depends(security)],
 ) -> dict:
     """Verify Supabase JWT with signing keys (JWKS) and return user claims (sub, email). Raises 401 if missing or invalid."""
     if not credentials or not credentials.credentials:

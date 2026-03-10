@@ -8,6 +8,7 @@ import { isSupabaseConfigured } from "@/lib/supabase";
 import AppPage from "./pages/App";
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
+import ForgotPassword from "./pages/ForgotPassword";
 import SetupRequired from "./pages/SetupRequired";
 import WorkspaceChannel from "./pages/WorkspaceChannel";
 import WorkspaceSettings from "./pages/WorkspaceSettings";
@@ -34,6 +35,7 @@ const App = () => {
           {/* Auth */}
           <Route path="/login" element={<Login />} />
           <Route path="/signup" element={<Signup />} />
+          <Route path="/forgot-password" element={<ForgotPassword />} />
 
           {/* Main app (protected) */}
           <Route path="/app/account" element={<ProtectedRoute><AccountSettings /></ProtectedRoute>} />

@@ -157,7 +157,7 @@ export default function Login() {
                 <span className="text-sm text-muted-foreground">Remember me</span>
               </label>
               <Link
-                to="#"
+                to="/forgot-password"
                 className="text-sm text-primary underline underline-offset-2 hover:opacity-80"
               >
                 Forgot password?
