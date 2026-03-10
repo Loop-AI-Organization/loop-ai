@@ -29,23 +29,19 @@ SELECT id, user_id, 'owner'
 FROM public.workspaces w
 WHERE NOT EXISTS (SELECT 1 FROM public.workspace_members wm WHERE wm.workspace_id = w.id AND wm.user_id = w.user_id);
 
--- RLS: workspace_members
+-- RLS: workspace_members (no self-reference to avoid infinite recursion)
 ALTER TABLE public.workspace_members ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Users manage workspace_members in their workspaces"
     ON public.workspace_members FOR ALL
     TO authenticated
     USING (
-        workspace_id IN (
-            SELECT workspace_id FROM public.workspace_members WHERE user_id = auth.uid()
-        )
-        OR workspace_id IN (SELECT id FROM public.workspaces WHERE user_id = auth.uid())
+        workspace_id IN (SELECT id FROM public.workspaces WHERE user_id = auth.uid())
+        OR user_id = auth.uid()
     )
     WITH CHECK (
-        workspace_id IN (
-            SELECT workspace_id FROM public.workspace_members WHERE user_id = auth.uid()
-        )
-        OR workspace_id IN (SELECT id FROM public.workspaces WHERE user_id = auth.uid())
+        workspace_id IN (SELECT id FROM public.workspaces WHERE user_id = auth.uid())
+        OR user_id = auth.uid()
     );
 
 -- RLS: channel_members

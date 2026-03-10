@@ -3,8 +3,8 @@ from pathlib import Path
 from pydantic import AnyUrl
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# .env at project root (parent of backend/app)
-_env_path = Path(__file__).resolve().parent.parent / ".env"
+# .env at repo root (backend/app -> backend -> repo root)
+_env_path = Path(__file__).resolve().parent.parent.parent / ".env"
 
 
 class Settings(BaseSettings):

@@ -10,11 +10,11 @@ import {
 } from '@/lib/supabase-data';
 import type { User } from '@/types';
 
-function authUserToUser(user: { id: string; email?: string } | null): User | null {
+function authUserToUser(user: { id: string; email?: string; user_metadata?: { full_name?: string } } | null): User | null {
   if (!user) return null;
   return {
     id: user.id,
-    name: user.email?.split('@')[0] ?? 'User',
+    name: user.user_metadata?.full_name ?? user.email?.split('@')[0] ?? 'User',
     email: user.email ?? '',
     status: 'online',
   };

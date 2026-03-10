@@ -72,7 +72,7 @@ export function UserProfile() {
               </>
             )}
           </DropdownMenuItem>
-          <DropdownMenuItem className="flex items-center gap-2">
+          <DropdownMenuItem onClick={() => navigate('/app/account')} className="flex items-center gap-2">
             <Settings className="w-4 h-4" />
             <span>Settings</span>
           </DropdownMenuItem>
