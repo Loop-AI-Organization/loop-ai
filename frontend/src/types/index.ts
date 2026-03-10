@@ -4,6 +4,7 @@ export interface Workspace {
   id: string;
   name: string;
   icon?: string;
+  ownerId?: string;
 }
 
 export interface WorkspaceMember {
@@ -11,6 +12,7 @@ export interface WorkspaceMember {
   userId: string;
   role: 'owner' | 'member';
   email?: string;
+  displayName?: string;
 }
 
 export interface Channel {

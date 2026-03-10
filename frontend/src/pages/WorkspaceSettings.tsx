@@ -21,6 +21,8 @@ import {
   fetchWorkspaceMembers,
   getWorkspaceShareCode,
   rotateWorkspaceShareCode,
+  fetchWorkspaceMemberProfiles,
+  removeWorkspaceMember,
 } from '@/lib/supabase-data';
 import type { WorkspaceMember } from '@/types';
 
@@ -36,8 +38,10 @@ export default function WorkspaceSettings() {
   const [shareError, setShareError] = useState<string | null>(null);
   const [rotating, setRotating] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [removeError, setRemoveError] = useState<string | null>(null);
   const {
     workspaces,
+    user,
     currentWorkspaceId,
     setCurrentWorkspace,
     setWorkspaces,
@@ -49,6 +53,7 @@ export default function WorkspaceSettings() {
   } = useAppStore();
 
   const workspace = workspaces.find(w => w.id === workspaceId);
+  const isOwner = workspace && user && workspace.ownerId === user.id;
 
   useEffect(() => {
     if (workspace) {
@@ -59,7 +64,7 @@ export default function WorkspaceSettings() {
   useEffect(() => {
     if (!workspaceId) return;
     let cancelled = false;
-    fetchWorkspaceMembers(workspaceId).then((list) => {
+    fetchWorkspaceMemberProfiles(workspaceId).then((list) => {
       if (!cancelled) setMembers(list);
     }).catch(() => {});
     return () => { cancelled = true; };
@@ -108,6 +113,17 @@ export default function WorkspaceSettings() {
       setTimeout(() => setCopied(false), 1500);
     } catch {
       // ignore clipboard errors
+    }
+  };
+
+  const handleRemoveMember = async (memberId: string) => {
+    if (!workspaceId) return;
+    setRemoveError(null);
+    try {
+      await removeWorkspaceMember(workspaceId, memberId);
+      setMembers((prev) => prev.filter((m) => m.id !== memberId));
+    } catch (e) {
+      setRemoveError(e instanceof Error ? e.message : 'Failed to remove member');
     }
   };
 
@@ -220,14 +236,31 @@ export default function WorkspaceSettings() {
                 {members.map((m) => (
                   <div key={m.id} className="grid grid-cols-[auto_1fr_auto] gap-3 items-center">
                     <div className="w-9 h-9 rounded-full bg-muted flex items-center justify-center text-sm font-medium shrink-0">
-                      {m.userId.slice(0, 2).toUpperCase()}
+                      {(m.displayName ?? m.email ?? '').slice(0, 2).toUpperCase() || '??'}
                     </div>
-                    <p className="text-sm font-medium truncate min-w-0">{m.email ?? m.userId}</p>
-                    <span className="text-xs text-muted-foreground bg-muted px-2 py-1 rounded capitalize shrink-0">{m.role}</span>
+                    <p className="text-sm font-medium truncate min-w-0">
+                      {m.displayName ?? m.email ?? 'User'}
+                    </p>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className="text-xs text-muted-foreground bg-muted px-2 py-1 rounded capitalize">
+                        {m.role}
+                      </span>
+                      {isOwner && m.role !== 'owner' && (
+                        <Button
+                          variant="outline"
+                          size="xs"
+                          className="text-xs"
+                          onClick={() => void handleRemoveMember(m.id)}
+                        >
+                          Remove
+                        </Button>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
             )}
+            {removeError && <p className="text-sm text-destructive">{removeError}</p>}
           </div>
         </section>
 

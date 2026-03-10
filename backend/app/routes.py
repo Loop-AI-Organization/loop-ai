@@ -27,6 +27,18 @@ class WorkspaceShareCodeResponse(BaseModel):
 class JoinByCodeRequest(BaseModel):
     code: str
 
+
+class WorkspaceMemberProfile(BaseModel):
+    id: str
+    user_id: str
+    role: str
+    email: str
+    display_name: str
+
+
+class RemoveMemberRequest(BaseModel):
+    member_id: str
+
 class SignedUploadRequest(BaseModel):
     path: str
     expires_in: int = 900
@@ -280,12 +292,143 @@ async def join_workspace_by_code(
         already_member = False
     except Exception as e:
         err = str(e)
-        if "duplicate" in err.lower() or "unique" in err.lower():
+        # Handle unique constraint on (workspace_id, user_id) gracefully
+        if (
+            "duplicate" in err.lower()
+            or "unique" in err.lower()
+            or "workspace_members_workspace_id_user_id_key" in err
+        ):
             already_member = True
         else:
             raise HTTPException(status_code=400, detail=err)
 
     return {"ok": True, "workspace_id": workspace_id, "already_member": already_member}
+
+
+@router.get("/api/workspaces/{workspace_id}/members", response_model=list[WorkspaceMemberProfile])
+async def get_workspace_members_with_profiles(
+    workspace_id: str,
+    user: Annotated[dict, Depends(get_current_user)],
+):
+    """Return workspace members with email + display name."""
+    uid = user.get("sub")
+    if not uid:
+        raise HTTPException(status_code=401, detail="Invalid user")
+
+    # Ensure caller is owner or member
+    ws = supabase.table("workspaces").select("id, user_id").eq("id", workspace_id).execute()
+    if not ws.data or len(ws.data) == 0:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+    workspace_row = ws.data[0]
+    owner_id = workspace_row.get("user_id")
+    if owner_id != uid:
+        members = (
+            supabase.table("workspace_members")
+            .select("user_id")
+            .eq("workspace_id", workspace_id)
+            .eq("user_id", uid)
+            .execute()
+        )
+        if not members.data or len(members.data) == 0:
+            raise HTTPException(status_code=403, detail="Not a member of this workspace")
+
+    wm_res = (
+        supabase.table("workspace_members")
+        .select("id, workspace_id, user_id, role, created_at")
+        .eq("workspace_id", workspace_id)
+        .order("created_at", desc=False)
+        .execute()
+    )
+    members_rows = wm_res.data or []
+    if not members_rows:
+        return []
+
+    user_ids = sorted({m.get("user_id") for m in members_rows if m.get("user_id")})
+
+    # Fetch auth users via admin API
+    settings = get_settings()
+    base = str(settings.supabase_url).rstrip("/")
+    auth_url = f"{base}/auth/v1/admin/users"
+    headers = {
+        "Authorization": f"Bearer {settings.supabase_service_role_key}",
+        "apikey": settings.supabase_service_role_key,
+        "Content-Type": "application/json",
+    }
+    async with httpx.AsyncClient() as client:
+        r = await client.get(auth_url, headers=headers, params={"per_page": 1000})
+    if r.status_code != 200:
+        raise HTTPException(status_code=502, detail="Auth admin request failed")
+    users_data = r.json()
+    users = users_data.get("users") or []
+    users_by_id = {u.get("id"): u for u in users if u.get("id") in user_ids}
+
+    profiles: list[WorkspaceMemberProfile] = []
+    for m in members_rows:
+        mid = m.get("id")
+        member_user_id = m.get("user_id")
+        role = m.get("role") or "member"
+        u = users_by_id.get(member_user_id) or {}
+        raw_email = (u.get("email") or "").strip()
+        user_meta = u.get("user_metadata") or {}
+        full_name = (user_meta.get("full_name") or "").strip()
+        if full_name:
+            display_name = full_name
+        elif raw_email:
+            display_name = raw_email.split("@")[0]
+        else:
+            display_name = "User"
+        email = raw_email or ""
+        profiles.append(
+            WorkspaceMemberProfile(
+                id=str(mid),
+                user_id=str(member_user_id),
+                role=str(role),
+                email=email,
+                display_name=display_name,
+            )
+        )
+    return profiles
+
+
+@router.post("/api/workspaces/{workspace_id}/members/remove")
+async def remove_workspace_member(
+    workspace_id: str,
+    body: RemoveMemberRequest,
+    user: Annotated[dict, Depends(get_current_user)],
+):
+    """Remove a member from a workspace. Only the workspace owner can remove others."""
+    uid = user.get("sub")
+    if not uid:
+        raise HTTPException(status_code=401, detail="Invalid user")
+
+    ws = supabase.table("workspaces").select("id, user_id").eq("id", workspace_id).execute()
+    if not ws.data or len(ws.data) == 0:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+    workspace_row = ws.data[0]
+    owner_id = workspace_row.get("user_id")
+    if owner_id != uid:
+        raise HTTPException(status_code=403, detail="Only the workspace owner can remove members")
+
+    # Do not allow owner to remove themselves via this endpoint
+    member_row_res = (
+        supabase.table("workspace_members")
+        .select("id, user_id, role")
+        .eq("id", body.member_id)
+        .eq("workspace_id", workspace_id)
+        .execute()
+    )
+    if not member_row_res.data:
+        raise HTTPException(status_code=404, detail="Member not found")
+    member_row = member_row_res.data[0]
+    if member_row.get("user_id") == owner_id:
+        raise HTTPException(status_code=400, detail="Owner cannot be removed from the workspace")
+
+    try:
+        supabase.table("workspace_members").delete().eq("id", body.member_id).execute()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return {"ok": True}
 
 
 @router.post("/api/auth/log-event")

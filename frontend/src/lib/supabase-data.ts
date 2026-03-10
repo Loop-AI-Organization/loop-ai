@@ -42,7 +42,7 @@ interface MessageRow {
 }
 
 function toWorkspace(r: WorkspaceRow): Workspace {
-  return { id: r.id, name: r.name, icon: r.icon };
+  return { id: r.id, name: r.name, icon: r.icon, ownerId: r.user_id };
 }
 
 function toChannel(r: ChannelRow): Channel {
@@ -296,6 +296,41 @@ export async function joinWorkspaceByCode(
     workspaceId: body.workspace_id as string,
     alreadyMember: body.already_member === true,
   };
+}
+
+/** Fetch workspace members with profile info (email + display name) via backend. */
+export async function fetchWorkspaceMemberProfiles(workspaceId: string): Promise<WorkspaceMember[]> {
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${API_URL}/api/workspaces/${workspaceId}/members`, {
+    method: 'GET',
+    headers,
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(body.detail ?? body.message ?? `Failed to load members (${res.status})`);
+  }
+  const list = (body as Array<{ id: string; user_id: string; role: string; email: string; display_name: string }>) ?? [];
+  return list.map((m) => ({
+    id: m.id,
+    userId: m.user_id,
+    role: m.role as 'owner' | 'member',
+    email: m.email,
+    displayName: m.display_name,
+  }));
+}
+
+/** Remove a member from a workspace (owner only). */
+export async function removeWorkspaceMember(workspaceId: string, memberId: string): Promise<void> {
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${API_URL}/api/workspaces/${workspaceId}/members/remove`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ member_id: memberId }),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(body.detail ?? body.message ?? `Failed to remove member (${res.status})`);
+  }
 }
 
 /** Find an existing 1:1 DM channel between current user and otherUserId in this workspace. */

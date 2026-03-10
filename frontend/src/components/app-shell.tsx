@@ -9,12 +9,14 @@ import { CommandPalette } from './command-palette';
 import { ActionChipsBar } from './action-chip';
 import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts';
 import { useAppData } from '@/hooks/use-app-data';
+import { useRealtimeMessages } from '@/hooks/use-realtime-messages';
 import { useAppStore } from '@/store/app-store';
 import { acceptWorkspaceInvite, fetchChannels } from '@/lib/supabase-data';
 import { cn } from '@/lib/utils';
 
 export function AppShell() {
   useKeyboardShortcuts();
+  useRealtimeMessages();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { dataLoading, dataError } = useAppData();
