@@ -1,16 +1,19 @@
 import { useState, useRef, useEffect, KeyboardEvent } from 'react';
-import { Send, Paperclip, AtSign, Slash, Zap } from 'lucide-react';
+import { Send, Paperclip, Bot, Zap } from 'lucide-react';
 import { useAppStore } from '@/store/app-store';
-import { streamAssistant } from '@/lib/api-client';
 import {
   createThread as createThreadInSupabase,
   insertMessage as insertMessageInSupabase,
   uploadThreadFile,
+  triageAndRespond,
 } from '@/lib/supabase-data';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
-import type { Message, Action } from '@/types';
+import type { Message } from '@/types';
+
+/** Check if message contains @ai mention (case-insensitive) */
+const hasAiMention = (text: string) => /@ai\b/i.test(text);
 
 export function Composer() {
   const [value, setValue] = useState('');
@@ -23,12 +26,8 @@ export function Composer() {
     currentChannelId,
     orchestratorStatus,
     addMessage,
-    addAction,
-    updateAction,
     setOrchestratorStatus,
-    setStreamingMessageId,
     addThread,
-    replaceMessage,
   } = useAppStore();
 
   // Auto-resize textarea
@@ -42,6 +41,7 @@ export function Composer() {
   const handleSubmit = async () => {
     if (!value.trim() || orchestratorStatus !== 'ready') return;
     const content = value.trim();
+    const mentionsAi = hasAiMention(content);
     let threadId = currentThreadId;
 
     // Create thread in Supabase if none exists
@@ -59,12 +59,11 @@ export function Composer() {
       }
     }
 
-    if (!threadId) return;
+    if (!threadId || !currentChannelId) return;
 
     // Persist user message to Supabase and add to store
-    let userMessage: Message;
     try {
-      userMessage = await insertMessageInSupabase(threadId, 'user', content);
+      const userMessage = await insertMessageInSupabase(threadId, 'user', content);
       addMessage(userMessage);
     } catch {
       addMessage({
@@ -77,45 +76,52 @@ export function Composer() {
     }
 
     setValue('');
+
+    // If user didn't @ai, just send the message — no AI response
+    if (!mentionsAi) {
+      return;
+    }
+
+    // --- @ai was mentioned: get AI response ---
     setOrchestratorStatus('thinking');
 
-    const assistantMessageId = `msg-stream-${Date.now()}`;
-    const assistantMessage: Message = {
-      id: assistantMessageId,
-      threadId,
-      role: 'assistant',
-      content: '',
-      createdAt: new Date(),
-      isStreaming: true,
-    };
-    addMessage(assistantMessage);
-    setStreamingMessageId(assistantMessageId);
-    setOrchestratorStatus('running');
+    // Build message history for context
+    const { messages: stateMessages } = useAppStore.getState();
+    const threadMessages = stateMessages
+      .filter(
+        (m) =>
+          m.threadId === threadId &&
+          m.content.trim().length > 0 &&
+          (m.role === 'user' || m.role === 'assistant')
+      )
+      .slice(-20)
+      .map((m) => ({ role: m.role, content: m.content }));
 
-    await streamAssistant(threadId, content, {
-      onToken: (token) => {
-        useAppStore.getState().appendToMessage(assistantMessageId, token);
-      },
-      onComplete: async (fullMessage) => {
-        useAppStore.getState().updateMessage(assistantMessageId, { isStreaming: false });
-        setStreamingMessageId(null);
-        setOrchestratorStatus('ready');
-        try {
-          const saved = await insertMessageInSupabase(threadId!, 'assistant', fullMessage.content);
-          useAppStore.getState().replaceMessage(assistantMessageId, saved);
-        } catch {
-          // keep local message
-        }
-      },
-      onActionUpdate: (action: Action) => {
-        const existingAction = useAppStore.getState().actions.find((a) => a.id === action.id);
-        if (existingAction) {
-          updateAction(action.id, action);
-        } else {
-          addAction(action);
-        }
-      },
-    });
+    try {
+      const result = await triageAndRespond(currentChannelId, threadId, threadMessages);
+
+      if (result.shouldRespond && result.content) {
+        const assistantMessage: Message = {
+          id: result.messageId || `msg-ai-${Date.now()}`,
+          threadId,
+          role: 'assistant',
+          content: result.content,
+          createdAt: new Date(),
+        };
+        addMessage(assistantMessage);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'AI response failed';
+      addMessage({
+        id: `msg-err-${Date.now()}`,
+        threadId,
+        role: 'assistant',
+        content: `[Assistant Error] ${message}`,
+        createdAt: new Date(),
+      });
+    }
+
+    setOrchestratorStatus('ready');
   };
 
   const handleAttachFile = () => {
@@ -136,16 +142,17 @@ export function Composer() {
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    // Enter sends; Shift+Enter keeps newline behavior.
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSubmit();
     }
   };
 
+  const showsAiHint = hasAiMention(value);
+
   const statusConfig = {
     ready: { label: 'Ready', color: 'text-accent-success' },
-    thinking: { label: 'Thinking...', color: 'text-accent-info' },
+    thinking: { label: 'AI is thinking...', color: 'text-accent-info' },
     running: { label: 'Running actions', color: 'text-accent-info' },
   };
 
@@ -153,6 +160,14 @@ export function Composer() {
 
   return (
     <div className="border-t border-border bg-card p-4 space-y-3">
+      {/* AI hint banner */}
+      {showsAiHint && (
+        <div className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-primary/10 text-primary text-xs font-medium">
+          <Bot className="w-3.5 h-3.5" />
+          AI will respond to this message
+        </div>
+      )}
+
       {/* Composer box */}
       <div className="relative bg-background border border-border rounded-lg focus-within:border-primary focus-within:ring-1 focus-within:ring-primary/20 transition-all">
         <Textarea
@@ -161,11 +176,11 @@ export function Composer() {
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Type your message... (Enter to send, Shift+Enter for newline)"
+          placeholder="Type a message... (use @ai to get an AI response)"
           className="min-h-[44px] max-h-[200px] border-0 bg-transparent resize-none focus-visible:ring-0 focus-visible:ring-offset-0 pr-24"
           disabled={orchestratorStatus !== 'ready'}
         />
-        
+
         {/* Action buttons */}
         <input
           ref={fileInputRef}
@@ -185,8 +200,8 @@ export function Composer() {
           >
             <Paperclip className="w-4 h-4 text-muted-foreground" />
           </Button>
-          <Button 
-            size="icon" 
+          <Button
+            size="icon"
             className="h-8 w-8"
             onClick={handleSubmit}
             disabled={!value.trim() || orchestratorStatus !== 'ready'}
@@ -206,18 +221,16 @@ export function Composer() {
             <span>for newline</span>
           </span>
           <span className="hidden sm:flex items-center gap-1.5 text-muted-foreground/60">
-            <AtSign className="w-3 h-3" />
-            <span>mention</span>
-            <Slash className="w-3 h-3 ml-2" />
-            <span>command</span>
+            <Bot className="w-3 h-3" />
+            <span>type <strong>@ai</strong> to get AI response</span>
           </span>
         </div>
-        
+
         {/* Status indicator */}
         <div className="flex items-center gap-2">
           <div className="flex items-center gap-1.5">
             <Zap className="w-3 h-3 text-muted-foreground" />
-            <span className="text-muted-foreground">Orchestrator:</span>
+            <span className="text-muted-foreground">AI:</span>
             <span className={cn('font-medium', status.color)}>
               {status.label}
             </span>

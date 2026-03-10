@@ -1,4 +1,4 @@
-from typing import Annotated
+from typing import Annotated, Optional, List
 import asyncio
 import json
 import httpx
@@ -8,7 +8,7 @@ from .config import get_settings
 from .supabase_client import supabase
 from .redis_queue import enqueue_action
 from .auth import get_current_user
-from loop_ai.orchestrator.orchestrator import stream_assistant_reply
+from loop_ai.orchestrator.orchestrator import stream_assistant_reply, triage_message, generate_full_response
 
 router = APIRouter()
 
@@ -317,3 +317,67 @@ async def ws_chat(websocket: WebSocket):
                 )
             except Exception:
                 pass
+
+
+# --- AI Auto-Response for Group Chat (@ai mention) ---
+
+class TriageRequest(BaseModel):
+    thread_id: str
+    messages: List[dict]  # [{role, content}]
+
+
+@router.post("/api/channels/{channel_id}/triage")
+async def respond_to_ai_mention(
+    channel_id: str,
+    body: TriageRequest,
+    user: Annotated[dict, Depends(get_current_user)],
+):
+    """
+    Generate an AI response for a group chat message that @mentioned the AI.
+    Called by the frontend only when the user explicitly typed @ai.
+    """
+    uid = user.get("sub")
+    if not uid:
+        raise HTTPException(status_code=401, detail="Invalid user")
+
+    msgs = [
+        {"role": m.get("role", "user"), "content": m.get("content", "")}
+        for m in body.messages
+        if isinstance(m, dict)
+        and isinstance(m.get("content"), str)
+        and m["content"].strip()
+    ]
+
+    if not msgs:
+        return {"should_respond": False, "reason": "No valid messages"}
+
+    # Generate response using GPT-4o (no triage needed — user explicitly @ai'd)
+    loop = asyncio.get_running_loop()
+    response_content = await loop.run_in_executor(
+        None, lambda: generate_full_response(messages=msgs)
+    )
+
+    if not response_content or not response_content.strip():
+        return {"should_respond": True, "response": None, "reason": "Empty response from model"}
+
+    # Save assistant message to Supabase
+    try:
+        result = (
+            supabase.table("messages")
+            .insert({
+                "thread_id": body.thread_id,
+                "role": "assistant",
+                "content": response_content.strip(),
+            })
+            .execute()
+        )
+        saved_message = result.data[0] if result.data else None
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to save AI response: {e}")
+
+    return {
+        "should_respond": True,
+        "message_id": saved_message["id"] if saved_message else None,
+        "content": response_content.strip(),
+    }
+

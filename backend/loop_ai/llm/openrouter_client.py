@@ -63,7 +63,7 @@ def stream_chat_completions(
     """
     Streams OpenRouter chat completion deltas.
 
-    `messages` should be OpenAI-compatible: [{\"role\": \"user\", \"content\": \"...\"}, ...]
+    `messages` should be OpenAI-compatible: [{"role": "user", "content": "..."}, ...]
     """
 
     headers: Dict[str, str] = {
@@ -117,3 +117,50 @@ def stream_chat_completions(
                 delta = _extract_delta(obj)
                 if delta:
                     yield OpenRouterDelta(content=delta)
+
+
+def chat_completion(
+    *,
+    settings: Settings,
+    messages: List[Dict[str, str]],
+    model: Optional[str] = None,
+    max_tokens: int = 16,
+    temperature: float = 0.0,
+) -> str:
+    """
+    Non-streaming chat completion. Returns the full response text.
+    Useful for lightweight calls like triage (YES/NO).
+    """
+
+    headers: Dict[str, str] = {
+        "Authorization": f"Bearer {settings.openrouter_api_key}",
+        "Content-Type": "application/json",
+    }
+
+    if settings.openrouter_app_url:
+        headers["HTTP-Referer"] = settings.openrouter_app_url
+    if settings.openrouter_app_title:
+        headers["X-Title"] = settings.openrouter_app_title
+
+    payload: Dict[str, Any] = {
+        "model": model or settings.openrouter_model,
+        "stream": False,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "messages": messages,
+    }
+
+    with httpx.Client(timeout=30) as client:
+        resp = client.post(OPENROUTER_CHAT_COMPLETIONS_URL, headers=headers, json=payload)
+
+    if resp.status_code >= 400:
+        raise OpenRouterError(
+            f"OpenRouter request failed ({resp.status_code} {resp.reason_phrase})"
+            + (f": {resp.text}" if resp.text else "")
+        )
+
+    data = resp.json()
+    try:
+        return data["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError):
+        return ""
