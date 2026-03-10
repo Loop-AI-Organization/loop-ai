@@ -459,6 +459,36 @@ export async function fetchMessages(threadId: string): Promise<Message[]> {
   return (data as MessageRow[]).map(toMessage);
 }
 
+export async function deleteMessage(messageId: string): Promise<void> {
+  const supabase = getSupabase();
+  const { error } = await supabase
+    .from('messages')
+    .delete()
+    .eq('id', messageId);
+  if (error) throw error;
+}
+
+export async function updateChannel(channelId: string, name: string): Promise<Channel> {
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from('channels')
+    .update({ name })
+    .eq('id', channelId)
+    .select('id, workspace_id, name, type, created_at')
+    .single();
+  if (error) throw error;
+  return toChannel(data as ChannelRow);
+}
+
+export async function deleteChannel(channelId: string): Promise<void> {
+  const supabase = getSupabase();
+  const { error } = await supabase
+    .from('channels')
+    .delete()
+    .eq('id', channelId);
+  if (error) throw error;
+}
+
 export async function insertMessage(threadId: string, role: Message['role'], content: string): Promise<Message> {
   const supabase = getSupabase();
   const { data: { user } } = await supabase.auth.getUser();

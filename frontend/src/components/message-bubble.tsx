@@ -1,6 +1,6 @@
 import { cn } from '@/lib/utils';
 import type { Message } from '@/types';
-import { User, Bot } from 'lucide-react';
+import { User, Bot, Trash2 } from 'lucide-react';
 import { useRef, useEffect } from 'react';
 import { useAppStore } from '@/store/app-store';
 
@@ -32,32 +32,59 @@ export function MessageBubble({ message, isStreaming }: MessageBubbleProps) {
     }
   }, [message.content, isStreaming]);
 
+  const handleDelete = async () => {
+    if (!isSelf) return;
+    try {
+      const { deleteMessage } = await import('@/lib/supabase-data');
+      await deleteMessage(message.id);
+      useAppStore.setState((s) => ({
+        messages: s.messages.filter((m) => m.id !== message.id),
+      }));
+    } catch (e) {
+      console.error('Failed to delete message:', e);
+    }
+  };
+
   return (
     <div
       className={cn(
-        'flex px-4 py-3 group',
+        'flex px-4 py-3 group relative transition-colors hover:bg-muted/50',
         side === 'right' ? 'justify-end' : 'justify-start'
       )}
     >
       <div
         className={cn(
-          'flex gap-3 max-w-[85%] min-w-0',
+          'flex gap-3 max-w-[85%] min-w-0 items-start',
           side === 'right' && 'flex-row-reverse'
         )}
       >
         {/* Avatar */}
-        <div
-          className={cn(
-            'w-8 h-8 rounded-md flex-shrink-0 flex items-center justify-center',
-            isAssistant ? 'bg-primary' : isSelf ? 'bg-primary' : 'bg-secondary'
-          )}
-        >
-          {isAssistant ? (
-            <Bot className="w-4 h-4 text-primary-foreground" />
-          ) : (
-            <User className={cn('w-4 h-4', isSelf ? 'text-primary-foreground' : 'text-secondary-foreground')} />
-          )}
+        <div className="flex flex-col items-center gap-1">
+          <div
+            className={cn(
+              'w-8 h-8 rounded-md flex-shrink-0 flex items-center justify-center',
+              isAssistant ? 'bg-primary' : isSelf ? 'bg-primary' : 'bg-secondary'
+            )}
+          >
+            {isAssistant ? (
+              <Bot className="w-4 h-4 text-primary-foreground" />
+            ) : (
+              <User className={cn('w-4 h-4', isSelf ? 'text-primary-foreground' : 'text-secondary-foreground')} />
+            )}
+          </div>
         </div>
+
+        {isSelf && !isStreaming && (
+          <div className="flex items-center self-center opacity-0 group-hover:opacity-100 transition-opacity">
+            <button
+              onClick={handleDelete}
+              className="p-1.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-md transition-colors"
+              title="Delete message"
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
+          </div>
+        )}
 
         {/* Content */}
         <div className={cn('min-w-0 space-y-1', side === 'right' && 'items-end text-right')}>

@@ -1,20 +1,28 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Hash, Pin, Plus } from 'lucide-react';
+import { Hash, Pin, Plus, MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
 import { useAppStore } from '@/store/app-store';
 import { cn } from '@/lib/utils';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  DropdownMenuSeparator,
+} from '@/components/ui/dropdown-menu';
 import {
   Dialog,
   DialogContent,
   DialogFooter,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { createChannel } from '@/lib/supabase-data';
+import { createChannel, updateChannel, deleteChannel } from '@/lib/supabase-data';
 
 export function ChannelList() {
   const navigate = useNavigate();
@@ -115,13 +123,14 @@ export function ChannelList() {
               value={newChannelName}
               onChange={(e) => setNewChannelName(e.target.value)}
               placeholder="e.g. general"
+              onKeyDown={(e) => e.key === 'Enter' && handleCreateChannel()}
             />
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setNewChannelOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={handleCreateChannel} disabled={creating || !newChannelName.trim()}>
+            <Button onClick={() => void handleCreateChannel()} disabled={creating || !newChannelName.trim()}>
               {creating ? 'Creating…' : 'Create'}
             </Button>
           </DialogFooter>
@@ -145,36 +154,227 @@ interface ChannelGroupProps {
 }
 
 function ChannelGroup({ channels, currentChannelId, onSelect, icon: Icon, showAvatar }: ChannelGroupProps) {
+  const navigate = useNavigate();
+  const {
+    user,
+    workspaces,
+    currentWorkspaceId,
+    channels: allChannels,
+    setChannels,
+    setThreads,
+    setMessages,
+    setCurrentChannel,
+    setCurrentThread,
+  } = useAppStore();
+
+  const currentWorkspace = workspaces.find((w) => w.id === currentWorkspaceId);
+  const isOwner = user && currentWorkspace?.ownerId === user.id;
+
+  // Rename config
+  const [renameOpen, setRenameOpen] = useState(false);
+  const [renameId, setRenameId] = useState<string | null>(null);
+  const [renameName, setRenameName] = useState('');
+  const [renaming, setRenaming] = useState(false);
+  const [renameError, setRenameError] = useState<string | null>(null);
+
+  // Delete config
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  const handleRename = async () => {
+    if (!renameId || renaming) return;
+    const trimmed = renameName.trim();
+    if (!trimmed) return;
+    setRenaming(true);
+    setRenameError(null);
+    try {
+      const updated = await updateChannel(renameId, trimmed);
+      setChannels(allChannels.map((c) => (c.id === renameId ? { ...c, name: updated.name } : c)));
+      setRenameOpen(false);
+      setRenameId(null);
+    } catch (e) {
+      setRenameError(e instanceof Error ? e.message : 'Failed to rename channel');
+    } finally {
+      setRenaming(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!deleteId || deleting) return;
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await deleteChannel(deleteId);
+      const remaining = allChannels.filter((c) => c.id !== deleteId);
+      setChannels(remaining);
+      
+      if (currentChannelId === deleteId) {
+        // If we deleted the active channel, try to switch to "#general" or the first available project channel
+        const workspaceChannels = remaining.filter((c) => c.workspaceId === currentWorkspaceId && c.type === 'project');
+        const fallback = workspaceChannels.find((c) => c.name === 'general') || workspaceChannels[0];
+        
+        if (fallback) {
+          setCurrentChannel(fallback.id);
+          setThreads([]);
+          setMessages([]);
+          setCurrentThread(null);
+          navigate(`/app/${currentWorkspaceId}/${fallback.id}`);
+        } else {
+          setCurrentChannel(null);
+          setThreads([]);
+          setMessages([]);
+          setCurrentThread(null);
+          navigate(`/app/${currentWorkspaceId}`);
+        }
+      }
+      setDeleteOpen(false);
+      setDeleteId(null);
+    } catch (e) {
+      setDeleteError(e instanceof Error ? e.message : 'Failed to delete channel');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const channelToRename = channels.find((c) => c.id === renameId);
+  const channelToDelete = channels.find((c) => c.id === deleteId);
+
   return (
-    <div className="space-y-0.5">
-      {channels.map((channel) => (
-        <button
-          key={channel.id}
-          onClick={() => onSelect(channel.id)}
-          className={cn(
-            'w-full flex items-center gap-2.5 px-3 py-1.5 rounded-md text-sm transition-colors',
-            'hover:bg-sidebar-accent',
-            currentChannelId === channel.id
-              ? 'bg-sidebar-accent text-sidebar-accent-foreground font-medium'
-              : 'text-sidebar-foreground'
-          )}
-        >
-          {showAvatar && channel.avatar ? (
-            <div className="w-5 h-5 rounded-full bg-muted flex items-center justify-center text-2xs font-medium text-muted-foreground">
-              {channel.avatar}
-            </div>
-          ) : (
-            <Icon className="w-4 h-4 text-text-tertiary flex-shrink-0" />
-          )}
-          <span className="truncate flex-1 text-left">{channel.name}</span>
-          {channel.unreadCount > 0 && (
-            <span className="min-w-5 h-5 px-1.5 rounded-full bg-primary text-primary-foreground text-2xs font-medium flex items-center justify-center">
-              {channel.unreadCount}
-            </span>
-          )}
-        </button>
-      ))}
-    </div>
+    <>
+      <div className="space-y-0.5">
+        {channels.map((channel) => (
+          <div key={channel.id} className="group relative flex items-center">
+            <button
+              onClick={() => onSelect(channel.id)}
+              className={cn(
+                'w-full flex items-center gap-2.5 px-3 py-1.5 rounded-md text-sm transition-colors',
+                'hover:bg-sidebar-accent cursor-pointer',
+                currentChannelId === channel.id
+                  ? 'bg-sidebar-accent text-sidebar-accent-foreground font-medium'
+                  : 'text-sidebar-foreground'
+              )}
+            >
+              {showAvatar && channel.avatar ? (
+                <div className="w-5 h-5 rounded-full bg-muted flex items-center justify-center text-2xs font-medium text-muted-foreground shrink-0">
+                  {channel.avatar}
+                </div>
+              ) : (
+                <Icon className="w-4 h-4 text-text-tertiary flex-shrink-0" />
+              )}
+              <span className="truncate flex-1 text-left">{channel.name}</span>
+              {channel.unreadCount > 0 && (
+                <span className="min-w-5 h-5 px-1.5 rounded-full bg-primary text-primary-foreground text-2xs font-medium flex items-center justify-center">
+                  {channel.unreadCount}
+                </span>
+              )}
+            </button>
+
+            {isOwner && !showAvatar && (
+              <div className="absolute right-1">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity bg-background hover:bg-sidebar-accent shadow-sm border border-border"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <MoreHorizontal className="w-3.5 h-3.5 text-muted-foreground" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent side="right" align="start" className="w-40">
+                    <DropdownMenuItem
+                      onSelect={(e) => {
+                        e.preventDefault();
+                        setRenameId(channel.id);
+                        setRenameName(channel.name);
+                        setRenameError(null);
+                        setRenameOpen(true);
+                      }}
+                      className="gap-2"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                      Rename
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      onSelect={(e) => {
+                        e.preventDefault();
+                        setDeleteId(channel.id);
+                        setDeleteError(null);
+                        setDeleteOpen(true);
+                      }}
+                      className="gap-2 text-destructive focus:text-destructive"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      Delete
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {/* Rename Channel Dialog */}
+      <Dialog open={renameOpen} onOpenChange={setRenameOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Rename channel</DialogTitle>
+            <DialogDescription>
+              Enter a new name for "#{channelToRename?.name}".
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="rename-channel">New name</Label>
+            <Input
+              id="rename-channel"
+              value={renameName}
+              onChange={(e) => setRenameName(e.target.value)}
+              autoFocus
+              onKeyDown={(e) => e.key === 'Enter' && handleRename()}
+            />
+            {renameError && <p className="text-sm text-destructive">{renameError}</p>}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRenameOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={() => void handleRename()} disabled={renaming || !renameName.trim()}>
+              {renaming ? 'Saving…' : 'Save'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Channel Dialog */}
+      <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete channel</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete "#{channelToDelete?.name}"? All threads and messages inside will be permanently deleted. This cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          {deleteError && <p className="text-sm text-destructive">{deleteError}</p>}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => void handleDelete()}
+              disabled={deleting}
+            >
+              <Trash2 className="w-4 h-4 mr-1.5" />
+              {deleting ? 'Deleting…' : 'Delete'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
-
