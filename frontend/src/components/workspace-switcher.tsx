@@ -13,7 +13,6 @@ import {
   createWorkspace,
   createChannel,
   fetchChannels,
-  fetchWorkspaces,
   joinWorkspaceByCode,
 } from '@/lib/supabase-data';
 import {
@@ -97,13 +96,11 @@ export function WorkspaceSwitcher() {
     setJoinError(null);
     try {
       const code = raw.toUpperCase();
-      const { workspaceId } = await joinWorkspaceByCode(code);
-      const allWorkspaces = await fetchWorkspaces();
-      setWorkspaces(allWorkspaces);
-      const workspace = allWorkspaces.find((w) => w.id === workspaceId);
-      if (!workspace) {
-        throw new Error('Joined workspace not found');
-      }
+      const { workspace } = await joinWorkspaceByCode(code);
+      setWorkspaces(prev => {
+        const without = prev.filter(w => w.id !== workspace.id);
+        return [...without, workspace];
+      });
       const channels = await fetchChannels(workspace.id);
       setChannels(channels);
       setThreads([]);

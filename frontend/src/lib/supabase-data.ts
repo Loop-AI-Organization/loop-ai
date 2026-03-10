@@ -281,7 +281,7 @@ export async function rotateWorkspaceShareCode(workspaceId: string): Promise<str
 /** Join a workspace using its share code. */
 export async function joinWorkspaceByCode(
   code: string
-): Promise<{ workspaceId: string; alreadyMember: boolean }> {
+): Promise<{ workspaceId: string; alreadyMember: boolean; workspace: Workspace }> {
   const headers = await getAuthHeaders();
   const res = await fetch(`${API_URL}/api/workspaces/join-by-code`, {
     method: 'POST',
@@ -292,9 +292,16 @@ export async function joinWorkspaceByCode(
   if (!res.ok) {
     throw new Error(body.detail ?? body.message ?? `Join by code failed (${res.status})`);
   }
+  const workspace: Workspace = {
+    id: body.workspace_id as string,
+    name: (body.workspace_name as string) ?? 'Workspace',
+    icon: (body.workspace_icon as string) ?? '◎',
+    ownerId: (body.workspace_owner_id as string) ?? '',
+  };
   return {
     workspaceId: body.workspace_id as string,
     alreadyMember: body.already_member === true,
+    workspace,
   };
 }
 

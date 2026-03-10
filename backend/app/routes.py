@@ -274,13 +274,13 @@ async def join_workspace_by_code(
 
     ws = (
         supabase.table("workspaces")
-        .select("id")
+        .select("id, name, icon, user_id")
         .eq("share_code", code)
         .execute()
     )
     if not ws.data or len(ws.data) == 0:
         raise HTTPException(status_code=404, detail="Workspace not found for this code")
-    workspace_row = ws.data[0]
+    workspace_row = ws.data[0] or {}
     workspace_id = workspace_row.get("id")
     if not workspace_id:
         raise HTTPException(status_code=500, detail="Workspace data is invalid")
@@ -302,7 +302,14 @@ async def join_workspace_by_code(
         else:
             raise HTTPException(status_code=400, detail=err)
 
-    return {"ok": True, "workspace_id": workspace_id, "already_member": already_member}
+    return {
+        "ok": True,
+        "workspace_id": workspace_id,
+        "workspace_name": workspace_row.get("name"),
+        "workspace_icon": workspace_row.get("icon"),
+        "workspace_owner_id": workspace_row.get("user_id"),
+        "already_member": already_member,
+    }
 
 
 @router.get("/api/workspaces/{workspace_id}/members", response_model=list[WorkspaceMemberProfile])
