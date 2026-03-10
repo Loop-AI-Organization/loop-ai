@@ -2,6 +2,7 @@ import { cn } from '@/lib/utils';
 import type { Message } from '@/types';
 import { User, Bot } from 'lucide-react';
 import { useRef, useEffect } from 'react';
+import { useAppStore } from '@/store/app-store';
 
 interface MessageBubbleProps {
   message: Message;
@@ -11,6 +12,18 @@ interface MessageBubbleProps {
 export function MessageBubble({ message, isStreaming }: MessageBubbleProps) {
   const isUser = message.role === 'user';
   const isAssistant = message.role === 'assistant';
+  const currentUser = useAppStore((s) => s.user);
+  const isSelf =
+    isUser &&
+    !!message.userId &&
+    !!currentUser?.id &&
+    message.userId === currentUser.id;
+  const side: 'left' | 'right' = isAssistant ? 'left' : isSelf ? 'right' : 'left';
+  const senderLabel = isAssistant
+    ? 'Loop AI'
+    : isSelf
+      ? 'You'
+      : message.userDisplayName || 'Member';
   const contentRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -22,46 +35,67 @@ export function MessageBubble({ message, isStreaming }: MessageBubbleProps) {
   return (
     <div
       className={cn(
-        'flex gap-4 px-4 py-4 group',
-        isUser && 'bg-muted/30'
+        'flex px-4 py-3 group',
+        side === 'right' ? 'justify-end' : 'justify-start'
       )}
     >
-      {/* Avatar */}
-      <div className={cn(
-        'w-8 h-8 rounded-md flex-shrink-0 flex items-center justify-center',
-        isUser ? 'bg-secondary' : 'bg-primary'
-      )}>
-        {isUser ? (
-          <User className="w-4 h-4 text-secondary-foreground" />
-        ) : (
-          <Bot className="w-4 h-4 text-primary-foreground" />
+      <div
+        className={cn(
+          'flex gap-3 max-w-[85%] min-w-0',
+          side === 'right' && 'flex-row-reverse'
         )}
-      </div>
-
-      {/* Content */}
-      <div className="flex-1 min-w-0 space-y-1">
-        {/* Header */}
-        <div className="flex items-center gap-2">
-          <span className="font-medium text-sm">
-            {isUser ? 'You' : 'Loop AI'}
-          </span>
-          <span className="text-2xs text-muted-foreground">
-            {formatTime(message.createdAt)}
-          </span>
-          {isStreaming && (
-            <span className="inline-flex items-center gap-1 text-2xs text-primary">
-              <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse-subtle" />
-              Streaming
-            </span>
+      >
+        {/* Avatar */}
+        <div
+          className={cn(
+            'w-8 h-8 rounded-md flex-shrink-0 flex items-center justify-center',
+            isAssistant ? 'bg-primary' : isSelf ? 'bg-primary' : 'bg-secondary'
+          )}
+        >
+          {isAssistant ? (
+            <Bot className="w-4 h-4 text-primary-foreground" />
+          ) : (
+            <User className={cn('w-4 h-4', isSelf ? 'text-primary-foreground' : 'text-secondary-foreground')} />
           )}
         </div>
 
-        {/* Message content */}
-        <div 
-          ref={contentRef}
-          className="prose prose-sm max-w-none text-foreground prose-headings:text-foreground prose-strong:text-foreground prose-code:text-foreground prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-pre:bg-surface-sunken prose-pre:border prose-pre:border-border"
-        >
-          <MessageContent content={message.content} />
+        {/* Content */}
+        <div className={cn('min-w-0 space-y-1', side === 'right' && 'items-end text-right')}>
+          {/* Header */}
+          <div className={cn('flex items-center gap-2', side === 'right' && 'justify-end')}>
+            <span className="font-medium text-sm">{senderLabel}</span>
+            <span className="text-2xs text-muted-foreground">{formatTime(message.createdAt)}</span>
+            {isStreaming && (
+              <span className="inline-flex items-center gap-1 text-2xs text-primary">
+                <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse-subtle" />
+                Streaming
+              </span>
+            )}
+          </div>
+
+          {/* Bubble */}
+          <div
+            ref={contentRef}
+            className={cn(
+              'rounded-xl px-3 py-2 border',
+              isAssistant
+                ? 'bg-muted border-border'
+                : isSelf
+                  ? 'bg-primary text-primary-foreground border-primary/30'
+                  : 'bg-secondary border-border'
+            )}
+          >
+            <div
+              className={cn(
+                'prose prose-sm max-w-none',
+                isSelf
+                  ? 'text-primary-foreground prose-headings:text-primary-foreground prose-strong:text-primary-foreground prose-code:text-primary-foreground prose-pre:border-primary/30 prose-pre:bg-primary/10'
+                  : 'text-foreground prose-headings:text-foreground prose-strong:text-foreground prose-code:text-foreground prose-code:bg-muted prose-pre:bg-surface-sunken prose-pre:border prose-pre:border-border'
+              )}
+            >
+              <MessageContent content={message.content} />
+            </div>
+          </div>
         </div>
       </div>
     </div>

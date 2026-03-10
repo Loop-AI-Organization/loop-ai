@@ -38,6 +38,8 @@ interface MessageRow {
   thread_id: string;
   role: string;
   content: string;
+  user_id?: string | null;
+  user_display_name?: string | null;
   created_at: string;
 }
 
@@ -73,6 +75,8 @@ function toMessage(r: MessageRow): Message {
     role: r.role as 'user' | 'assistant' | 'system' | 'tool',
     content: r.content,
     createdAt: new Date(r.created_at),
+    userId: r.user_id ?? null,
+    userDisplayName: r.user_display_name ?? null,
   };
 }
 
@@ -442,7 +446,7 @@ export async function fetchMessages(threadId: string): Promise<Message[]> {
   const supabase = getSupabase();
   const { data, error } = await supabase
     .from('messages')
-    .select('id, thread_id, role, content, created_at')
+    .select('id, thread_id, role, content, user_id, user_display_name, created_at')
     .eq('thread_id', threadId)
     .order('created_at', { ascending: true });
   if (error) throw error;
@@ -451,10 +455,21 @@ export async function fetchMessages(threadId: string): Promise<Message[]> {
 
 export async function insertMessage(threadId: string, role: Message['role'], content: string): Promise<Message> {
   const supabase = getSupabase();
+  const { data: { user } } = await supabase.auth.getUser();
+  const isUser = role === 'user';
+  const userId = isUser ? (user?.id ?? null) : null;
+  const userDisplayName = isUser
+    ? (user?.user_metadata?.full_name ?? user?.email?.split('@')[0] ?? null)
+    : null;
   const { data, error } = await supabase
     .from('messages')
-    .insert({ thread_id: threadId, role, content })
-    .select('id, thread_id, role, content, created_at')
+    .insert({
+      thread_id: threadId,
+      role,
+      content,
+      ...(isUser ? { user_id: userId, user_display_name: userDisplayName } : {}),
+    })
+    .select('id, thread_id, role, content, user_id, user_display_name, created_at')
     .single();
   if (error) throw error;
   return toMessage(data as MessageRow);
