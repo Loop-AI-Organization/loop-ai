@@ -10,7 +10,14 @@ from .config import get_settings
 from .supabase_client import supabase
 from .redis_queue import enqueue_action
 from .auth import get_current_user
-from loop_ai.orchestrator.orchestrator import stream_assistant_reply, triage_message, generate_full_response
+from loop_ai.orchestrator.orchestrator import (
+    stream_assistant_reply,
+    triage_message,
+    generate_full_response,
+    detect_navigation_intent,
+    find_best_channel,
+    generate_channel_summary,
+)
 
 router = APIRouter()
 
@@ -601,6 +608,54 @@ class TriageRequest(BaseModel):
     messages: List[dict]  # [{role, content}]
 
 
+def _get_user_channels(uid: str) -> list[dict]:
+    """
+    Fetch all channels (with workspace info and summary) visible to the user.
+    Used for AI navigation matching.
+    """
+    # Workspaces the user owns or is a member of
+    owned = supabase.table("workspaces").select("id, name, summary").eq("user_id", uid).execute()
+    memberships = (
+        supabase.table("workspace_members")
+        .select("workspace_id")
+        .eq("user_id", uid)
+        .execute()
+    )
+    member_ids = [r["workspace_id"] for r in (memberships.data or [])]
+    workspace_map: dict[str, dict] = {w["id"]: w for w in (owned.data or [])}
+    if member_ids:
+        member_ws = (
+            supabase.table("workspaces")
+            .select("id, name, summary")
+            .in_("id", member_ids)
+            .execute()
+        )
+        for w in (member_ws.data or []):
+            workspace_map.setdefault(w["id"], w)
+
+    if not workspace_map:
+        return []
+
+    channels_res = (
+        supabase.table("channels")
+        .select("id, workspace_id, name, type, summary")
+        .in_("workspace_id", list(workspace_map.keys()))
+        .execute()
+    )
+    result = []
+    for ch in (channels_res.data or []):
+        ws = workspace_map.get(ch["workspace_id"], {})
+        result.append({
+            "id": ch["id"],
+            "workspace_id": ch["workspace_id"],
+            "name": ch["name"],
+            "type": ch.get("type", "project"),
+            "workspace_name": ws.get("name", ""),
+            "summary": ch.get("summary") or f"Channel #{ch['name']} in workspace {ws.get('name', '')}",
+        })
+    return result
+
+
 @router.post("/api/channels/{channel_id}/triage")
 async def respond_to_ai_mention(
     channel_id: str,
@@ -608,8 +663,9 @@ async def respond_to_ai_mention(
     user: Annotated[dict, Depends(get_current_user)],
 ):
     """
-    Generate an AI response for a group chat message that @mentioned the AI.
-    Called by the frontend only when the user explicitly typed @ai.
+    Handle an @ai mention in a channel. First checks if it's a navigation request
+    (e.g. "take me to the channel about bills"). If so, returns a navigation result.
+    Otherwise generates a normal AI response.
     """
     uid = user.get("sub")
     if not uid:
@@ -626,8 +682,43 @@ async def respond_to_ai_mention(
     if not msgs:
         return {"should_respond": False, "reason": "No valid messages"}
 
-    # Generate response using GPT-4o (no triage needed — user explicitly @ai'd)
     loop = asyncio.get_running_loop()
+
+    # --- Step 1: Detect navigation intent ---
+    nav_intent = await loop.run_in_executor(
+        None, lambda: detect_navigation_intent(messages=msgs)
+    )
+
+    if nav_intent.get("is_navigation") and nav_intent.get("query"):
+        query = nav_intent["query"]
+        channels = await loop.run_in_executor(None, lambda: _get_user_channels(uid))
+        if not channels:
+            return {
+                "should_respond": True,
+                "content": "I couldn't find any channels to navigate to.",
+            }
+        match = await loop.run_in_executor(
+            None, lambda: find_best_channel(query=query, channels=channels)
+        )
+        if match.get("channel_id"):
+            return {
+                "should_respond": False,
+                "navigation": {
+                    "channel_id": match["channel_id"],
+                    "workspace_id": match["workspace_id"],
+                    "channel_name": match.get("channel_name"),
+                    "workspace_name": match.get("workspace_name"),
+                    "confidence": match.get("confidence", "medium"),
+                    "reason": match.get("reason", ""),
+                },
+            }
+        # No match found — fall through to normal response
+        return {
+            "should_respond": True,
+            "content": f"I couldn't find a channel matching \"{query}\". Try being more specific.",
+        }
+
+    # --- Step 2: Normal AI response ---
     response_content = await loop.run_in_executor(
         None, lambda: generate_full_response(messages=msgs)
     )
@@ -650,9 +741,24 @@ async def respond_to_ai_mention(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save AI response: {e}")
 
+    # Trigger async summary regeneration for this channel (fire-and-forget)
+    asyncio.get_event_loop().run_in_executor(
+        None,
+        lambda: _maybe_enqueue_summary(channel_id),
+    )
+
     return {
         "should_respond": True,
         "message_id": saved_message["id"] if saved_message else None,
         "content": response_content.strip(),
     }
+
+
+def _maybe_enqueue_summary(channel_id: str) -> None:
+    """Enqueue a summary generation job for the channel (best-effort, won't crash triage)."""
+    try:
+        from .redis_queue import enqueue_action
+        enqueue_action(channel_id, "generate_summary", action_id=None)
+    except Exception:
+        pass
 

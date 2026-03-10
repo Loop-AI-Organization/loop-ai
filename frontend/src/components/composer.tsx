@@ -1,11 +1,15 @@
 import { useState, useRef, useEffect, KeyboardEvent } from 'react';
-import { Send, Paperclip, Bot, Zap } from 'lucide-react';
+import { Send, Paperclip, Bot, Zap, Navigation } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '@/store/app-store';
 import {
   createThread as createThreadInSupabase,
   insertMessage as insertMessageInSupabase,
   uploadThreadFile,
   triageAndRespond,
+  fetchChannels,
+  fetchThreads,
+  fetchMessages,
 } from '@/lib/supabase-data';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -16,10 +20,18 @@ import type { Message } from '@/types';
 const hasAiMention = (text: string) => /@ai\b/i.test(text);
 
 export function Composer() {
+  const navigate = useNavigate();
   const [value, setValue] = useState('');
   const [uploading, setUploading] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [navigationBanner, setNavigationBanner] = useState<{
+    channelName?: string;
+    workspaceName?: string;
+    channelId: string;
+    workspaceId: string;
+  } | null>(null);
+
   const {
     currentThreadId,
     currentWorkspaceId,
@@ -28,6 +40,11 @@ export function Composer() {
     addMessage,
     setOrchestratorStatus,
     addThread,
+    setCurrentWorkspace,
+    setCurrentChannel,
+    setChannels,
+    setThreads,
+    setMessages,
   } = useAppStore();
 
   // Auto-resize textarea
@@ -100,7 +117,29 @@ export function Composer() {
     try {
       const result = await triageAndRespond(currentChannelId, threadId, threadMessages);
 
-      if (result.shouldRespond && result.content) {
+      if (result.navigation) {
+        // AI detected a navigation request — navigate to the target channel
+        const { channelId, workspaceId, channelName, workspaceName } = result.navigation;
+        setNavigationBanner({ channelId, workspaceId, channelName, workspaceName });
+        // Load the target workspace/channel data then navigate
+        try {
+          const channels = await fetchChannels(workspaceId);
+          setChannels(channels);
+          const threads = await fetchThreads(channelId);
+          setThreads(threads);
+          const latest = threads.sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime())[0];
+          const msgs = latest ? await fetchMessages(latest.id) : [];
+          setMessages(msgs);
+          setCurrentWorkspace(workspaceId);
+          setCurrentChannel(channelId);
+        } catch {
+          // Navigation data load failed — still navigate, data will load via useAppData
+          setCurrentWorkspace(workspaceId);
+          setCurrentChannel(channelId);
+        }
+        navigate(`/app/${workspaceId}/${channelId}`);
+        setTimeout(() => setNavigationBanner(null), 3000);
+      } else if (result.shouldRespond && result.content) {
         const assistantMessage: Message = {
           id: result.messageId || `msg-ai-${Date.now()}`,
           threadId,
@@ -160,8 +199,22 @@ export function Composer() {
 
   return (
     <div className="border-t border-border bg-card p-4 space-y-3">
+      {/* Navigation banner */}
+      {navigationBanner && (
+        <div className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-accent-success/10 text-accent-success text-xs font-medium animate-in fade-in slide-in-from-bottom-2">
+          <Navigation className="w-3.5 h-3.5 shrink-0" />
+          <span>
+            Navigating to{' '}
+            <strong>
+              {navigationBanner.workspaceName && `${navigationBanner.workspaceName} / `}
+              {navigationBanner.channelName ?? 'channel'}
+            </strong>
+          </span>
+        </div>
+      )}
+
       {/* AI hint banner */}
-      {showsAiHint && (
+      {showsAiHint && !navigationBanner && (
         <div className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-primary/10 text-primary text-xs font-medium">
           <Bot className="w-3.5 h-3.5" />
           AI will respond to this message

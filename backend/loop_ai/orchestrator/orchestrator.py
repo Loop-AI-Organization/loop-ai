@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Dict, Iterator, List
+import json
+from typing import Dict, Iterator, List, Optional
 
 from loop_ai.config import load_settings
 from loop_ai.llm.openrouter_client import stream_chat_completions, chat_completion
@@ -59,6 +60,122 @@ def stream_assistant_reply(*, messages: List[Dict[str, str]]) -> Iterator[str]:
     settings = load_settings()
     for delta in stream_chat_completions(settings=settings, messages=messages):
         yield delta.content
+
+
+_NAVIGATION_DETECT_PROMPT = """\
+You are a navigation intent detector. Decide if the user wants to navigate to a different channel or workspace.
+
+Reply ONLY with valid JSON: {"is_navigation": true/false, "query": "<search topic or null>"}
+
+Navigation requests look like:
+- "take me to the channel about X"
+- "go to where we talked about X"
+- "open the chat with Sarah"
+- "find the channel for the research deadline stuff"
+- "navigate to the bills workspace"
+
+Extract the CORE search topic as "query" (e.g. "research deadlines", "bills", "API design").
+If not a navigation request, return {"is_navigation": false, "query": null}.\
+"""
+
+_CHANNEL_MATCH_PROMPT = """\
+You are a channel navigator. Given a search query and a list of channels/workspaces with summaries, pick the BEST match.
+
+Reply ONLY with valid JSON:
+{{"channel_id": "<id or null>", "workspace_id": "<id or null>", "channel_name": "<name or null>", "workspace_name": "<name or null>", "confidence": "high|medium|low", "reason": "<one sentence>"}}
+
+Return null for all fields if nothing is a reasonable match.
+
+Available channels:
+{channels_json}\
+"""
+
+
+def detect_navigation_intent(*, messages: List[Dict[str, str]]) -> Dict:
+    """
+    Use a fast model to decide if the user wants to navigate to a different channel.
+    Returns {"is_navigation": bool, "query": str | None}.
+    """
+    settings = load_settings()
+    msgs = [
+        {"role": "system", "content": _NAVIGATION_DETECT_PROMPT},
+        *messages[-3:],
+    ]
+    raw = chat_completion(
+        settings=settings,
+        messages=msgs,
+        model=settings.openrouter_triage_model,
+        max_tokens=64,
+        temperature=0.0,
+    )
+    try:
+        result = json.loads(raw.strip())
+        return {"is_navigation": bool(result.get("is_navigation")), "query": result.get("query")}
+    except Exception:
+        return {"is_navigation": False, "query": None}
+
+
+def find_best_channel(*, query: str, channels: List[Dict]) -> Dict:
+    """
+    Given a navigation query and a list of channel dicts
+    (each with id, workspace_id, name, workspace_name, summary),
+    return the best matching channel using LLM ranking.
+
+    Returns {"channel_id", "workspace_id", "channel_name", "workspace_name", "confidence", "reason"}.
+    """
+    settings = load_settings()
+    channels_json = json.dumps(channels, indent=2)
+    prompt = _CHANNEL_MATCH_PROMPT.format(channels_json=channels_json)
+    msgs = [
+        {"role": "system", "content": prompt},
+        {"role": "user", "content": f"Navigate to: {query}"},
+    ]
+    raw = chat_completion(
+        settings=settings,
+        messages=msgs,
+        model=settings.openrouter_triage_model,
+        max_tokens=128,
+        temperature=0.0,
+    )
+    try:
+        return json.loads(raw.strip())
+    except Exception:
+        return {
+            "channel_id": None,
+            "workspace_id": None,
+            "channel_name": None,
+            "workspace_name": None,
+            "confidence": "low",
+            "reason": "Could not parse navigation result",
+        }
+
+
+def generate_channel_summary(*, channel_name: str, recent_messages: List[Dict[str, str]]) -> str:
+    """
+    Generate a short summary of a channel from its recent messages.
+    Used by the background worker to keep channel summaries fresh.
+    """
+    settings = load_settings()
+    system = (
+        "You are a channel summarizer. Given recent messages from a chat channel, "
+        "write a 1-2 sentence summary of the channel's main topics and purpose. "
+        "Be specific — include key topics, projects, names, or concepts discussed. "
+        "Write in present tense. No preamble."
+    )
+    context = "\n".join(
+        f"{m.get('role', 'user')}: {m.get('content', '')}" for m in recent_messages[-30:]
+    )
+    msgs = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": f"Channel: #{channel_name}\n\nRecent messages:\n{context}"},
+    ]
+    return chat_completion(
+        settings=settings,
+        messages=msgs,
+        model=settings.openrouter_triage_model,
+        max_tokens=128,
+        temperature=0.3,
+    ).strip()
 
 
 def generate_full_response(*, messages: List[Dict[str, str]]) -> str:
