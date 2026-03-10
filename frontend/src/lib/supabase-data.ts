@@ -76,6 +76,15 @@ function toMessage(r: MessageRow): Message {
   };
 }
 
+/**
+ * Update the current user's profile display name in Supabase Auth user_metadata.
+ */
+export async function updateAccountProfile(displayName: string): Promise<void> {
+  const supabase = getSupabase();
+  const { error } = await supabase.auth.updateUser({ data: { full_name: displayName } });
+  if (error) throw error;
+}
+
 export async function fetchWorkspaces(): Promise<Workspace[]> {
   const supabase = getSupabase();
   const { data, error } = await supabase

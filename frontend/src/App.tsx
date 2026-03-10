@@ -11,6 +11,7 @@ import Signup from "./pages/Signup";
 import SetupRequired from "./pages/SetupRequired";
 import WorkspaceChannel from "./pages/WorkspaceChannel";
 import WorkspaceSettings from "./pages/WorkspaceSettings";
+import AccountSettings from "./pages/AccountSettings";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -25,7 +26,7 @@ const App = () => {
     <TooltipProvider>
       <Toaster />
       <Sonner />
-      <BrowserRouter>
+      <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
         <Routes>
           {/* Redirect root to app */}
           <Route path="/" element={<Navigate to="/app" replace />} />
@@ -35,6 +36,7 @@ const App = () => {
           <Route path="/signup" element={<Signup />} />
 
           {/* Main app (protected) */}
+          <Route path="/app/account" element={<ProtectedRoute><AccountSettings /></ProtectedRoute>} />
           <Route path="/app" element={<ProtectedRoute><AppPage /></ProtectedRoute>} />
           <Route path="/app/:workspaceId/:channelId" element={<ProtectedRoute><WorkspaceChannel /></ProtectedRoute>} />
           <Route path="/app/:workspaceId/settings" element={<ProtectedRoute><WorkspaceSettings /></ProtectedRoute>} />

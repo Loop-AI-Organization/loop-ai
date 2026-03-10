@@ -49,8 +49,8 @@ const lines = [
   'VITE_SUPABASE_URL=' + url,
   'VITE_SUPABASE_ANON_KEY=' + anonKey,
   '',
-  '# Backend API base URL (optional; default in code: http://localhost:4000)',
-  '# VITE_API_URL=http://localhost:4000',
+  'VITE_API_URL=http://localhost:4000',
+  'VITE_BACKEND_WS_URL=ws://localhost:4000/ws',
   '',
 ];
 

@@ -10,7 +10,8 @@ Follow these steps in order. When done, you’ll have the app running with real 
 2. **Auth**: **Authentication → Providers** → enable **Email**.
 3. **URLs**: **Authentication → URL Configuration**  
    - **Site URL**: `http://localhost:8080` (this app’s frontend port by default; see step 7).  
-   - **Redirect URLs**: add the same (e.g. `http://localhost:8080`).
+   - **Redirect URLs**: add the same (e.g. `http://localhost:8080`).  
+   - If the app runs on a different port (e.g. **8081** when 8080 is in use), add that origin too: `http://localhost:8081` in **Redirect URLs** and set **Site URL** to it if you open the app there.
 4. **API keys**: **Settings → API** — you’ll need:
    - Project URL  
    - `anon` (public) key  
@@ -185,7 +186,9 @@ Note the URL (this project uses **port 8080** by default in `vite.config.ts`, so
 | Login redirects in a loop or wrong URL | Set **Site URL** and **Redirect URLs** in Supabase **Authentication → URL Configuration** to your frontend URL (e.g. `http://localhost:8080`). |
 | After login, “Loading your workspaces…” forever or error | 1) Run the DB setup (step 2). 2) In Supabase **SQL Editor**, confirm tables `workspaces`, `channels`, `threads`, `messages` exist. |
 | Worker fails: Redis connection | Start Redis or set `REDIS_URL` to a running Redis instance. |
-| 401 on API calls from frontend | Backend uses Supabase JWKS; no JWT secret needed. Ensure the frontend sends the Supabase session (it does if you’re logged in). |
+| **CORS / "CORS request did not succeed"** or **Status code: (null)** when calling Supabase Auth (e.g. refresh token) | The browser never got a response. 1) **Supabase project paused**: In [Supabase Dashboard](https://supabase.com/dashboard) → your project → **Settings → General**, resume the project if paused. 2) **Origin not allowlisted**: In **Authentication → URL Configuration**, set **Site URL** and **Redirect URLs** to your dev origin (e.g. `http://localhost:8080`, or `http://127.0.0.1:8080` if you use that). If the app runs on a different port (e.g. **8081**), add that origin (e.g. `http://localhost:8081`) to **Redirect URLs** and **Site URL** as needed. 3) **Browser/network**: Ad blockers or privacy extensions can block `*.supabase.co`; try a private window or disable extensions. 4) **Env**: Ensure `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` in `frontend/.env` match the project (run `node scripts/sync-env.js` from root if using the sync script). |
+| **Auth lock timeout** ("Acquiring an exclusive Navigator LockManager lock … timed out") | Usually a side effect of auth refresh failing (e.g. CORS/network above). Fix Supabase access (project not paused, URLs allowlisted, env correct); the lock timeout should stop. |
+| 401 on API calls from frontend | Backend uses Supabase JWKS; no JWT secret needed. Ensure the frontend sends the Supabase session (it does if you're logged in). |
 
 ---
 
