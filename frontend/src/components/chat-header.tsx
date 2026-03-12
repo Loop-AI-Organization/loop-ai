@@ -1,9 +1,7 @@
-import { useState } from 'react';
-import { Search, Plus, PanelRightClose, PanelRightOpen, Menu, ChevronRight } from 'lucide-react';
+import { Search, PanelRightClose, PanelRightOpen, Menu, ChevronRight } from 'lucide-react';
 import { useAppStore } from '@/store/app-store';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { createThread as createThreadInSupabase } from '@/lib/supabase-data';
 
 export function ChatHeader() {
   const {
@@ -17,28 +15,11 @@ export function ChatHeader() {
     toggleInspector,
     toggleSidebar,
     setCommandPaletteOpen,
-    addThread,
   } = useAppStore();
-  const [creating, setCreating] = useState(false);
 
   const currentWorkspace = workspaces.find((w) => w.id === currentWorkspaceId);
   const currentChannel = channels.find((c) => c.id === currentChannelId);
   const currentThread = threads.find((t) => t.id === currentThreadId);
-
-  const handleNewThread = async () => {
-    if (!currentWorkspaceId || !currentChannelId) return;
-    setCreating(true);
-    try {
-      const thread = await createThreadInSupabase(
-        currentWorkspaceId,
-        currentChannelId,
-        'Untitled thread'
-      );
-      addThread(thread);
-    } finally {
-      setCreating(false);
-    }
-  };
 
   return (
     <header className="h-14 border-b border-border flex items-center justify-between px-4 bg-card flex-shrink-0">
@@ -75,25 +56,13 @@ export function ChatHeader() {
         <div className="relative hidden sm:block">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <Input
-            placeholder="Search..."
-            className="w-48 pl-8 h-8 text-sm bg-muted/50 border-transparent focus:border-border"
+            placeholder="Search channels, DMs, or threads..."
+            className="w-64 pl-8 h-8 text-sm bg-muted/50 border-transparent focus:border-border"
             onClick={() => setCommandPaletteOpen(true)}
             readOnly
           />
           <kbd className="absolute right-2 top-1/2 -translate-y-1/2 kbd">⌘K</kbd>
         </div>
-
-        {/* New Thread */}
-        <Button
-          variant="outline"
-          size="sm"
-          className="gap-1.5"
-          onClick={handleNewThread}
-          disabled={creating || !currentChannelId}
-        >
-          <Plus className="w-4 h-4" />
-          <span className="hidden sm:inline">{creating ? 'Creating…' : 'New thread'}</span>
-        </Button>
 
         {/* Toggle Inspector */}
         <Button

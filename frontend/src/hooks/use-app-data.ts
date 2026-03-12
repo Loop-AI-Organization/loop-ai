@@ -86,27 +86,55 @@ export function useAppData() {
     async function initialHydrate() {
       setDataError(null);
       try {
-        const { workspace, channel } = await ensureDefaultWorkspaceAndChannel();
+        const { workspace: ensuredWorkspace, channel: ensuredChannel } = await ensureDefaultWorkspaceAndChannel();
         if (cancelled) return;
 
         const workspaces = await fetchWorkspaces();
         if (cancelled) return;
         setWorkspaces(workspaces);
+
+        // Preserve the user's current workspace/channel selection when possible
+        // (e.g. returning from Workspace Settings), otherwise fall back safely.
+        const initialState = useAppStore.getState();
+        const workspace =
+          workspaces.find((w) => w.id === initialState.currentWorkspaceId) ??
+          workspaces.find((w) => w.id === ensuredWorkspace.id) ??
+          workspaces[0];
+        if (!workspace) {
+          setChannels([]);
+          setThreads([]);
+          setMessages([]);
+          useAppStore.setState({ currentWorkspaceId: null, currentChannelId: null, currentThreadId: null });
+          return;
+        }
         setCurrentWorkspace(workspace.id);
 
         const channels = await fetchChannels(workspace.id);
         if (cancelled) return;
         setChannels(channels);
+
+        const channel =
+          channels.find((c) => c.id === initialState.currentChannelId) ??
+          channels.find((c) => c.id === ensuredChannel.id) ??
+          channels[0];
+        if (!channel) {
+          setThreads([]);
+          setMessages([]);
+          useAppStore.setState({ currentChannelId: null, currentThreadId: null });
+          return;
+        }
         setCurrentChannel(channel.id);
 
         const threads = await fetchThreads(channel.id);
         if (cancelled) return;
         setThreads(threads);
-        const latestThread = threads.sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime())[0];
-        setCurrentThread(latestThread?.id ?? null);
+        const selectedThread =
+          threads.find((t) => t.id === initialState.currentThreadId) ??
+          threads.sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime())[0];
+        setCurrentThread(selectedThread?.id ?? null);
 
-        if (latestThread) {
-          const messages = await fetchMessages(latestThread.id);
+        if (selectedThread) {
+          const messages = await fetchMessages(selectedThread.id);
           if (!cancelled) setMessages(messages);
         } else {
           setMessages([]);
@@ -138,11 +166,6 @@ export function useAppData() {
     let cancelled = false;
 
     async function loadWorkspaceData() {
-      // Clear old data synchronously so UI doesn't flash stale channels
-      setChannels([]);
-      setThreads([]);
-      setMessages([]);
-      
       try {
         const channels = await fetchChannels(currentWorkspaceId!);
         if (cancelled) return;
@@ -258,7 +281,7 @@ export function useAppData() {
           table: 'messages',
           filter: `thread_id=eq.${currentThreadId}`,
         },
-        (payload: RealtimePostgresChangesPayload<{ [key: string]: any }>) => {
+        (payload: RealtimePostgresChangesPayload<{ [key: string]: unknown }>) => {
           const next = payload.new as MessageRow;
           if (!next?.id) return;
           const state = useAppStore.getState();
@@ -274,7 +297,7 @@ export function useAppData() {
           table: 'messages',
           filter: `thread_id=eq.${currentThreadId}`,
         },
-        (payload: RealtimePostgresChangesPayload<{ [key: string]: any }>) => {
+        (payload: RealtimePostgresChangesPayload<{ [key: string]: unknown }>) => {
           const next = payload.new as MessageRow;
           if (!next?.id) return;
           useAppStore.getState().updateMessage(next.id, {
@@ -292,7 +315,7 @@ export function useAppData() {
           table: 'messages',
           filter: `thread_id=eq.${currentThreadId}`,
         },
-        (payload: RealtimePostgresChangesPayload<{ [key: string]: any }>) => {
+        (payload: RealtimePostgresChangesPayload<{ [key: string]: unknown }>) => {
           const oldRow = payload.old as Partial<MessageRow> | null;
           if (!oldRow?.id) return;
           useAppStore.setState((state) => ({

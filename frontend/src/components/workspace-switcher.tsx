@@ -78,6 +78,7 @@ export function WorkspaceSwitcher() {
     try {
       setCurrentWorkspace(workspace.id);
       const channels = await fetchChannels(workspace.id);
+      setCurrentWorkspace(workspace.id);
       setChannels(channels);
       setThreads([]);
       setMessages([]);
@@ -159,11 +160,11 @@ export function WorkspaceSwitcher() {
         } else {
           const other = remaining[0];
           const channels = await fetchChannels(other.id);
-          
+          setCurrentWorkspace(other.id);
           setChannels(channels);
           const firstChannelId = channels[0]?.id;
           if (firstChannelId) {
-            
+            setCurrentChannel(firstChannelId);
             setCurrentThread(null);
             setThreads([]);
             setMessages([]);
@@ -198,6 +199,7 @@ export function WorkspaceSwitcher() {
       setWorkspaces([...without, workspace]);
       setCurrentWorkspace(workspace.id);
       const channels = await fetchChannels(workspace.id);
+      setCurrentWorkspace(workspace.id);
       setChannels(channels);
       setThreads([]);
       setMessages([]);

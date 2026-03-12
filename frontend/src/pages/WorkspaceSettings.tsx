@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAppStore } from '@/store/app-store';
-import { ArrowLeft, Users, Trash2, Globe, Lock } from 'lucide-react';
+import { ArrowLeft, Trash2, Globe, Lock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
@@ -18,7 +18,6 @@ import {
   deleteWorkspace,
   fetchChannels,
   updateWorkspace,
-  fetchWorkspaceMembers,
   getWorkspaceShareCode,
   rotateWorkspaceShareCode,
   fetchWorkspaceMemberProfiles,
@@ -41,8 +40,10 @@ export default function WorkspaceSettings() {
   const [removeError, setRemoveError] = useState<string | null>(null);
   const {
     workspaces,
+    channels,
     user,
     currentWorkspaceId,
+    currentChannelId,
     setCurrentWorkspace,
     setWorkspaces,
     setChannels,
@@ -56,10 +57,8 @@ export default function WorkspaceSettings() {
   const isOwner = workspace && user && workspace.ownerId === user.id;
 
   useEffect(() => {
-    if (workspace) {
-      setName(workspace.name);
-    }
-  }, [workspace?.id, workspace?.name]);
+    setName(workspace?.name ?? '');
+  }, [workspace]);
 
   useEffect(() => {
     if (!workspaceId) return;
@@ -178,6 +177,41 @@ export default function WorkspaceSettings() {
     }
   };
 
+  const handleBackToWorkspace = async () => {
+    if (!workspaceId) {
+      navigate('/app');
+      return;
+    }
+
+    setCurrentWorkspace(workspaceId);
+    const workspaceChannels = channels.filter((c) => c.workspaceId === workspaceId);
+    let targetChannelId =
+      workspaceChannels.find((c) => c.id === currentChannelId)?.id ?? workspaceChannels[0]?.id ?? null;
+
+    if (!targetChannelId) {
+      try {
+        const fetchedChannels = await fetchChannels(workspaceId);
+        setChannels(fetchedChannels);
+        targetChannelId =
+          fetchedChannels.find((c) => c.id === currentChannelId)?.id ?? fetchedChannels[0]?.id ?? null;
+      } catch {
+        targetChannelId = null;
+      }
+    }
+
+    if (targetChannelId) {
+      setCurrentChannel(targetChannelId);
+      navigate(`/app/${workspaceId}/${targetChannelId}`);
+      return;
+    }
+
+    setThreads([]);
+    setMessages([]);
+    setCurrentThread(null);
+    useAppStore.setState({ currentChannelId: null, currentThreadId: null });
+    navigate('/app');
+  };
+
   useEffect(() => {
     if (!workspace) {
       navigate('/app');
@@ -195,7 +229,7 @@ export default function WorkspaceSettings() {
         <Button 
           variant="ghost" 
           size="icon"
-          onClick={() => navigate('/app')}
+          onClick={() => void handleBackToWorkspace()}
         >
           <ArrowLeft className="w-5 h-5" />
         </Button>

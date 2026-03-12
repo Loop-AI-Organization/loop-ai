@@ -1,8 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, Hash, MessageSquare, Plus, ArrowRight } from 'lucide-react';
+import { Search, Hash, MessageSquare } from 'lucide-react';
 import { useAppStore } from '@/store/app-store';
-import { createThread as createThreadInSupabase } from '@/lib/supabase-data';
 import {
   CommandDialog,
   CommandEmpty,
@@ -22,11 +21,8 @@ export function CommandPalette() {
     currentWorkspaceId,
     setCurrentChannel,
     setCurrentThread,
-    addThread,
-    currentChannelId,
   } = useAppStore();
   const navigate = useNavigate();
-  const [creating, setCreating] = useState(false);
 
   const [search, setSearch] = useState('');
 
@@ -42,19 +38,36 @@ export function CommandPalette() {
     [channels, currentWorkspaceId]
   );
 
-  const filteredChannels = useMemo(() => {
-    if (!search) return workspaceChannels;
-    return workspaceChannels.filter(c => 
-      c.name.toLowerCase().includes(search.toLowerCase())
-    );
-  }, [workspaceChannels, search]);
+  const normalizedSearch = useMemo(() => search.trim().toLowerCase(), [search]);
+
+  const filteredProjectChannels = useMemo(() => {
+    return workspaceChannels.filter((c) => {
+      if (c.type !== 'project') return false;
+      if (!normalizedSearch) return true;
+      return c.name.toLowerCase().includes(normalizedSearch);
+    });
+  }, [workspaceChannels, normalizedSearch]);
+
+  const filteredDmChannels = useMemo(() => {
+    return workspaceChannels.filter((c) => {
+      if (c.type !== 'dm') return false;
+      if (!normalizedSearch) return true;
+      return c.name.toLowerCase().includes(normalizedSearch);
+    });
+  }, [workspaceChannels, normalizedSearch]);
+
+  const workspaceChannelIds = useMemo(
+    () => new Set(workspaceChannels.map((channel) => channel.id)),
+    [workspaceChannels]
+  );
 
   const filteredThreads = useMemo(() => {
-    if (!search) return threads.slice(0, 5);
-    return threads.filter(t => 
-      t.title.toLowerCase().includes(search.toLowerCase())
+    const workspaceThreads = threads.filter((thread) => workspaceChannelIds.has(thread.channelId));
+    if (!normalizedSearch) return workspaceThreads.slice(0, 10);
+    return workspaceThreads.filter((thread) =>
+      thread.title.toLowerCase().includes(normalizedSearch)
     );
-  }, [threads, search]);
+  }, [threads, workspaceChannelIds, normalizedSearch]);
 
   const handleChannelSelect = (channelId: string) => {
     setCurrentChannel(channelId);
@@ -64,26 +77,18 @@ export function CommandPalette() {
     }
   };
 
-  const handleThreadSelect = (threadId: string) => {
-    setCurrentThread(threadId);
+  const handleThreadSelect = (thread: { id: string; channelId: string }) => {
+    setCurrentChannel(thread.channelId);
+    setCurrentThread(thread.id);
     setCommandPaletteOpen(false);
-  };
-
-  const handleNewThread = async () => {
-    if (!currentWorkspaceId || !currentChannelId) return;
-    setCreating(true);
-    try {
-      const thread = await createThreadInSupabase(
-        currentWorkspaceId,
-        currentChannelId,
-        'Untitled thread'
-      );
-      addThread(thread);
-      setCommandPaletteOpen(false);
-    } finally {
-      setCreating(false);
+    if (currentWorkspaceId) {
+      navigate(`/app/${currentWorkspaceId}/${thread.channelId}`);
     }
   };
+
+  const hasProjectChannels = filteredProjectChannels.length > 0;
+  const hasDmChannels = filteredDmChannels.length > 0;
+  const hasThreads = filteredThreads.length > 0;
 
   return (
     <CommandDialog 
@@ -91,72 +96,74 @@ export function CommandPalette() {
       onOpenChange={setCommandPaletteOpen}
     >
       <CommandInput 
-        placeholder="Search channels, threads, or type a command..." 
+        placeholder="Search channels, DMs, or threads..." 
         value={search}
         onValueChange={setSearch}
       />
       <CommandList>
         <CommandEmpty>No results found.</CommandEmpty>
 
-        {/* Quick Actions */}
-        <CommandGroup heading="Quick Actions">
-          <CommandItem onSelect={handleNewThread} disabled={creating}>
-            <Plus className="mr-2 h-4 w-4" />
-            <span>{creating ? 'Creating…' : 'New Thread'}</span>
-            <span className="ml-auto text-xs text-muted-foreground">in current channel</span>
-          </CommandItem>
-          <CommandItem onSelect={() => {
-            const composer = document.querySelector('[data-composer-input]') as HTMLTextAreaElement;
-            composer?.focus();
-            setCommandPaletteOpen(false);
-          }}>
-            <ArrowRight className="mr-2 h-4 w-4" />
-            <span>Focus Composer</span>
-            <kbd className="ml-auto kbd">⌘/</kbd>
-          </CommandItem>
-        </CommandGroup>
-
-        <CommandSeparator />
-
-        {/* Channels */}
-        <CommandGroup heading="Channels">
-          {filteredChannels.map((channel) => (
-            <CommandItem 
-              key={channel.id}
-              onSelect={() => handleChannelSelect(channel.id)}
-            >
-              {channel.type === 'project' ? (
+        {/* Project channels */}
+        {hasProjectChannels && (
+          <CommandGroup heading="Channels">
+            {filteredProjectChannels.map((channel) => (
+              <CommandItem 
+                key={channel.id}
+                onSelect={() => handleChannelSelect(channel.id)}
+              >
                 <Hash className="mr-2 h-4 w-4" />
-              ) : (
-                <MessageSquare className="mr-2 h-4 w-4" />
-              )}
-              <span>{channel.name}</span>
-              {channel.unreadCount > 0 && (
-                <span className="ml-auto min-w-5 h-5 px-1.5 rounded-full bg-primary text-primary-foreground text-2xs font-medium flex items-center justify-center">
-                  {channel.unreadCount}
-                </span>
-              )}
-            </CommandItem>
-          ))}
-        </CommandGroup>
+                <span>#{' '}{channel.name}</span>
+                {channel.unreadCount > 0 && (
+                  <span className="ml-auto min-w-5 h-5 px-1.5 rounded-full bg-primary text-primary-foreground text-2xs font-medium flex items-center justify-center">
+                    {channel.unreadCount}
+                  </span>
+                )}
+              </CommandItem>
+            ))}
+          </CommandGroup>
+        )}
 
-        <CommandSeparator />
+        {hasProjectChannels && (hasDmChannels || hasThreads) && <CommandSeparator />}
+
+        {/* Direct messages */}
+        {hasDmChannels && (
+          <CommandGroup heading="Direct Messages">
+            {filteredDmChannels.map((channel) => (
+              <CommandItem 
+                key={channel.id}
+                onSelect={() => handleChannelSelect(channel.id)}
+              >
+                <MessageSquare className="mr-2 h-4 w-4" />
+                <span>{channel.name}</span>
+                {channel.unreadCount > 0 && (
+                  <span className="ml-auto min-w-5 h-5 px-1.5 rounded-full bg-primary text-primary-foreground text-2xs font-medium flex items-center justify-center">
+                    {channel.unreadCount}
+                  </span>
+                )}
+              </CommandItem>
+            ))}
+          </CommandGroup>
+        )}
+
+        {hasDmChannels && hasThreads && <CommandSeparator />}
 
         {/* Threads */}
-        <CommandGroup heading="Recent Threads">
-          {filteredThreads.map((thread) => (
-            <CommandItem 
-              key={thread.id}
-              onSelect={() => handleThreadSelect(thread.id)}
-            >
-              <Search className="mr-2 h-4 w-4 text-muted-foreground" />
-              <span className="truncate">{thread.title}</span>
-              <span className="ml-auto text-xs text-muted-foreground">
-                {thread.messageCount} messages
-              </span>
-            </CommandItem>
-          ))}
-        </CommandGroup>
+        {hasThreads && (
+          <CommandGroup heading="Threads">
+            {filteredThreads.map((thread) => (
+              <CommandItem 
+                key={thread.id}
+                onSelect={() => handleThreadSelect(thread)}
+              >
+                <Search className="mr-2 h-4 w-4 text-muted-foreground" />
+                <span className="truncate">{thread.title}</span>
+                <span className="ml-auto text-xs text-muted-foreground">
+                  {thread.messageCount} messages
+                </span>
+              </CommandItem>
+            ))}
+          </CommandGroup>
+        )}
       </CommandList>
     </CommandDialog>
   );
