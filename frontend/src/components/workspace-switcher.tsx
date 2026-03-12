@@ -76,6 +76,7 @@ export function WorkspaceSwitcher() {
     if (workspace.id === currentWorkspaceId) return;
     setSwitching(true);
     try {
+      setCurrentWorkspace(workspace.id);
       const channels = await fetchChannels(workspace.id);
       setChannels(channels);
       setThreads([]);
@@ -84,6 +85,7 @@ export function WorkspaceSwitcher() {
       
       const firstChannelId = channels[0]?.id;
       if (firstChannelId) {
+        setCurrentChannel(firstChannelId);
         navigate(`/app/${workspace.id}/${firstChannelId}`);
       } else {
         useAppStore.setState({ currentChannelId: null });
@@ -103,7 +105,9 @@ export function WorkspaceSwitcher() {
       const workspace = await createWorkspace({ name });
       const channel = await createChannel(workspace.id, 'general');
       setWorkspaces([...workspaces, workspace]);
+      setCurrentWorkspace(workspace.id);
       setChannels([channel]);
+      setCurrentChannel(channel.id);
       setThreads([]);
       setMessages([]);
       setCurrentThread(null);
@@ -192,6 +196,7 @@ export function WorkspaceSwitcher() {
       const { workspace } = await joinWorkspaceByCode(code);
       const without = workspaces.filter(w => w.id !== workspace.id);
       setWorkspaces([...without, workspace]);
+      setCurrentWorkspace(workspace.id);
       const channels = await fetchChannels(workspace.id);
       setChannels(channels);
       setThreads([]);
@@ -199,6 +204,7 @@ export function WorkspaceSwitcher() {
       setCurrentThread(null);
       const firstChannelId = channels[0]?.id;
       if (firstChannelId) {
+        setCurrentChannel(firstChannelId);
         navigate(`/app/${workspace.id}/${firstChannelId}`);
       } else {
         useAppStore.setState({ currentChannelId: null });
