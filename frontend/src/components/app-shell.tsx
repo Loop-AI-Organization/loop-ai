@@ -24,15 +24,9 @@ export function AppShell() {
 
   const {
     actions,
-    currentThreadId,
+    currentChannelId,
     isInspectorOpen,
     isSidebarOpen,
-    setChannels,
-    setCurrentWorkspace,
-    setCurrentChannel,
-    setThreads,
-    setMessages,
-    setCurrentThread,
   } = useAppStore();
 
   // After sign-up from invite link: ?workspace_id=...&invited=1 → accept invite and go to workspace
@@ -44,29 +38,23 @@ export function AppShell() {
     acceptWorkspaceInvite(workspaceId)
       .then(() => fetchChannels(workspaceId))
       .then((channels) => {
-        setChannels(channels);
-        setCurrentWorkspace(workspaceId);
+        // Cache channels for the joined workspace without wiping other workspaces.
+        useAppStore.getState().mergeChannels(workspaceId, channels);
         const firstId = channels[0]?.id;
+        setSearchParams({}, { replace: true });
         if (firstId) {
-          setCurrentChannel(firstId);
-          setThreads([]);
-          setMessages([]);
-          setCurrentThread(null);
-          setSearchParams({}, { replace: true });
           navigate(`/app/${workspaceId}/${firstId}`, { replace: true });
-        } else {
-          setSearchParams({}, { replace: true });
         }
       })
       .catch(() => {
         acceptInviteDone.current = false;
         setSearchParams({}, { replace: true });
       });
-  }, [searchParams, dataLoading, setChannels, setCurrentWorkspace, setCurrentChannel, setThreads, setMessages, setCurrentThread, navigate, setSearchParams]);
+  }, [searchParams, dataLoading, navigate, setSearchParams]);
   
   // Get streaming/active actions for the current thread
   const activeActions = actions.filter(
-    (a) => a.threadId === currentThreadId && (a.status === 'running' || a.status === 'queued')
+    (a) => !!currentChannelId && (a.status === 'running' || a.status === 'queued')
   );
 
   if (dataLoading) {

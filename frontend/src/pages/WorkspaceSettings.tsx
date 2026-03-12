@@ -1,27 +1,19 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAppStore } from '@/store/app-store';
-import { ArrowLeft, Users, Trash2, Globe, Lock } from 'lucide-react';
+import { ArrowLeft, Trash2, Globe, Lock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from '@/components/ui/dialog';
-import {
   deleteWorkspace,
   fetchChannels,
   updateWorkspace,
-  fetchWorkspaceMembers,
+  fetchWorkspaceMemberProfiles,
   getWorkspaceShareCode,
   rotateWorkspaceShareCode,
-  fetchWorkspaceMemberProfiles,
   removeWorkspaceMember,
 } from '@/lib/supabase-data';
 import type { WorkspaceMember } from '@/types';
@@ -39,55 +31,94 @@ export default function WorkspaceSettings() {
   const [rotating, setRotating] = useState(false);
   const [copied, setCopied] = useState(false);
   const [removeError, setRemoveError] = useState<string | null>(null);
-  const {
-    workspaces,
-    user,
-    currentWorkspaceId,
-    setCurrentWorkspace,
-    setWorkspaces,
-    setChannels,
-    setThreads,
-    setMessages,
-    setCurrentChannel,
-    setCurrentThread,
-  } = useAppStore();
 
-  const workspace = workspaces.find(w => w.id === workspaceId);
+  const { workspaces, user, currentChannelId, channels, setWorkspaces } = useAppStore();
+  const workspace = workspaces.find((w) => w.id === workspaceId);
   const isOwner = workspace && user && workspace.ownerId === user.id;
 
-  useEffect(() => {
-    if (workspace) {
-      setName(workspace.name);
+  // ── Back navigation ────────────────────────────────────────────────────────
+  /**
+   * Navigate back to the workspace that owns this settings page.
+   * We never call setCurrentWorkspace / setChannels here — WorkspaceChannel
+   * handles that when the URL changes.
+   */
+  const navigateBackToWorkspace = async () => {
+    if (!workspaceId) {
+      navigate('/app');
+      return;
     }
-  }, [workspace?.id, workspace?.name]);
+
+    // Try to stay on the channel the user was already on if it belongs here.
+    const wsChannels = channels.filter((c) => c.workspaceId === workspaceId);
+    const stayOn =
+      currentChannelId && wsChannels.some((c) => c.id === currentChannelId)
+        ? currentChannelId
+        : null;
+
+    if (stayOn) {
+      navigate(`/app/${workspaceId}/${stayOn}`);
+      return;
+    }
+
+    // Otherwise resolve general / first channel.
+    let target =
+      wsChannels.find((c) => c.name === 'general') ?? wsChannels[0] ?? null;
+
+    if (!target) {
+      // Channels not loaded yet — fetch them now.
+      try {
+        const fetched = await fetchChannels(workspaceId);
+        useAppStore.getState().mergeChannels(workspaceId, fetched);
+        target = fetched.find((c) => c.name === 'general') ?? fetched[0] ?? null;
+      } catch {
+        navigate('/app');
+        return;
+      }
+    }
+
+    if (target) {
+      navigate(`/app/${workspaceId}/${target.id}`);
+    } else {
+      navigate('/app');
+    }
+  };
+
+  // ── Data loading ──────────────────────────────────────────────────────────
+
+  useEffect(() => {
+    if (workspace) setName(workspace.name);
+  }, [workspace]);
 
   useEffect(() => {
     if (!workspaceId) return;
     let cancelled = false;
-    fetchWorkspaceMemberProfiles(workspaceId).then((list) => {
-      if (!cancelled) setMembers(list);
-    }).catch(() => {});
+    fetchWorkspaceMemberProfiles(workspaceId)
+      .then((list) => { if (!cancelled) setMembers(list); })
+      .catch(() => {});
     return () => { cancelled = true; };
   }, [workspaceId]);
+
   useEffect(() => {
     if (!workspaceId) return;
     let cancelled = false;
     setShareLoading(true);
     setShareError(null);
     getWorkspaceShareCode(workspaceId)
-      .then((code) => {
-        if (!cancelled) setShareCode(code);
-      })
+      .then((code) => { if (!cancelled) setShareCode(code); })
       .catch((e) => {
-        if (!cancelled) setShareError(e instanceof Error ? e.message : 'Failed to load share code');
+        if (!cancelled)
+          setShareError(e instanceof Error ? e.message : 'Failed to load share code');
       })
-      .finally(() => {
-        if (!cancelled) setShareLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
+      .finally(() => { if (!cancelled) setShareLoading(false); });
+    return () => { cancelled = true; };
   }, [workspaceId]);
+
+  // Redirect if workspace doesn't exist.
+  useEffect(() => {
+    if (!workspace && workspaces.length > 0) navigate('/app');
+  }, [workspace, workspaces.length, navigate]);
+
+  // ── Handlers ──────────────────────────────────────────────────────────────
 
   const handleRotateShareCode = async () => {
     if (!workspaceId) return;
@@ -132,7 +163,7 @@ export default function WorkspaceSettings() {
     setSaving(true);
     try {
       const updated = await updateWorkspace(workspaceId, { name });
-      setWorkspaces(workspaces.map(w => w.id === workspaceId ? { ...w, name: updated.name } : w));
+      setWorkspaces(workspaces.map((w) => (w.id === workspaceId ? { ...w, name: updated.name } : w)));
     } finally {
       setSaving(false);
     }
@@ -145,32 +176,31 @@ export default function WorkspaceSettings() {
     try {
       await deleteWorkspace(workspaceId);
       const remaining = workspaces.filter((w) => w.id !== workspaceId);
-      setWorkspaces(remaining);
-      if (currentWorkspaceId === workspaceId) {
-        if (remaining.length === 0) {
-          setChannels([]);
-          setThreads([]);
-          setMessages([]);
-          useAppStore.setState({ currentWorkspaceId: null, currentChannelId: null, currentThreadId: null });
-          navigate('/app');
+      // Remove channels for deleted workspace.
+      useAppStore.setState((s) => ({
+        workspaces: remaining,
+        channels: s.channels.filter((c) => c.workspaceId !== workspaceId),
+      }));
+
+      if (remaining.length === 0) {
+        useAppStore.setState({ currentWorkspaceId: null, currentChannelId: null, messages: [] });
+        navigate('/app');
+      } else {
+        // Find a destination in another workspace.
+        const other = remaining[0];
+        const { mergeChannels } = useAppStore.getState();
+        let otherChannels = useAppStore
+          .getState()
+          .channels.filter((c) => c.workspaceId === other.id);
+        if (otherChannels.length === 0) {
+          otherChannels = await fetchChannels(other.id);
+          mergeChannels(other.id, otherChannels);
+        }
+        const dest = otherChannels.find((c) => c.name === 'general') ?? otherChannels[0];
+        if (dest) {
+          navigate(`/app/${other.id}/${dest.id}`);
         } else {
-          const other = remaining[0];
-          const channels = await fetchChannels(other.id);
-          setCurrentWorkspace(other.id);
-          setChannels(channels);
-          const firstChannelId = channels[0]?.id;
-          if (firstChannelId) {
-            setCurrentChannel(firstChannelId);
-            setCurrentThread(null);
-            setThreads([]);
-            setMessages([]);
-            navigate(`/app/${other.id}/${firstChannelId}`);
-          } else {
-            setThreads([]);
-            setMessages([]);
-            useAppStore.setState({ currentChannelId: null, currentThreadId: null });
-            navigate('/app');
-          }
+          navigate('/app');
         }
       }
     } finally {
@@ -178,25 +208,13 @@ export default function WorkspaceSettings() {
     }
   };
 
-  useEffect(() => {
-    if (!workspace) {
-      navigate('/app');
-      return;
-    }
-    setCurrentWorkspace(workspaceId!);
-  }, [workspaceId, workspace, setCurrentWorkspace, navigate]);
-
   if (!workspace) return null;
 
   return (
     <div className="min-h-screen bg-background">
       {/* Header */}
       <header className="h-14 border-b border-border flex items-center px-4 gap-4">
-        <Button 
-          variant="ghost" 
-          size="icon"
-          onClick={() => navigate('/app')}
-        >
+        <Button variant="ghost" size="icon" onClick={() => void navigateBackToWorkspace()}>
           <ArrowLeft className="w-5 h-5" />
         </Button>
         <div>
@@ -215,7 +233,7 @@ export default function WorkspaceSettings() {
               <Label>Workspace name</Label>
               <Input value={name} onChange={(e) => setName(e.target.value)} className="w-full" />
             </div>
-            <Button onClick={handleSaveGeneral} disabled={saving}>
+            <Button onClick={() => void handleSaveGeneral()} disabled={saving}>
               {saving ? 'Saving…' : 'Save'}
             </Button>
           </div>
@@ -225,9 +243,7 @@ export default function WorkspaceSettings() {
 
         {/* Members */}
         <section className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-lg font-semibold">Members</h2>
-          </div>
+          <h2 className="text-lg font-semibold">Members</h2>
           <div className="p-5 rounded-lg border border-border space-y-4">
             {members.length === 0 ? (
               <p className="text-sm text-muted-foreground">No members yet.</p>
@@ -281,7 +297,7 @@ export default function WorkspaceSettings() {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={handleCopyShareCode}
+                  onClick={() => void handleCopyShareCode()}
                   disabled={!shareCode || shareLoading}
                 >
                   {copied ? 'Copied' : 'Copy'}
@@ -289,7 +305,7 @@ export default function WorkspaceSettings() {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={handleRotateShareCode}
+                  onClick={() => void handleRotateShareCode()}
                   disabled={shareLoading || rotating}
                 >
                   {rotating ? 'Rotating…' : 'Regenerate'}
@@ -336,15 +352,13 @@ export default function WorkspaceSettings() {
             <div className="flex items-center justify-between gap-4">
               <div className="min-w-0">
                 <p className="text-sm font-medium">Delete workspace</p>
-                <p className="text-xs text-muted-foreground">
-                  This action cannot be undone
-                </p>
+                <p className="text-xs text-muted-foreground">This action cannot be undone</p>
               </div>
               <Button
                 variant="destructive"
                 size="sm"
                 className="gap-1.5 shrink-0"
-                onClick={handleDeleteWorkspace}
+                onClick={() => void handleDeleteWorkspace()}
                 disabled={deleting}
               >
                 <Trash2 className="w-4 h-4" />
@@ -354,6 +368,7 @@ export default function WorkspaceSettings() {
           </div>
         </section>
       </main>
+
     </div>
   );
 }

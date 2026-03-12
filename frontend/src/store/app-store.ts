@@ -1,26 +1,24 @@
 import { create } from 'zustand';
-import type { Workspace, Channel, Thread, Message, Action, OrchestratorStatus, ThreadSettings } from '@/types';
+import type { Workspace, Channel, Message, Action, OrchestratorStatus, ThreadSettings } from '@/types';
 import type { ContextItem, FileItem, User } from '@/types';
 
 interface AppState {
   // User (from Supabase auth)
   user: User | null;
 
-  // Navigation
+  // Navigation (driven by URL via WorkspaceChannel page)
   currentWorkspaceId: string | null;
   currentChannelId: string | null;
-  currentThreadId: string | null;
 
-  // Data (from Supabase; RLS = per-user)
+  // Data — channels are stored for ALL loaded workspaces (keyed by workspaceId inside each item)
   workspaces: Workspace[];
   channels: Channel[];
-  threads: Thread[];
   messages: Message[];
   actions: Action[];
   contextItems: ContextItem[];
   files: FileItem[];
 
-  // Loading
+  // Loading (true only on the very first app load)
   dataLoading: boolean;
   dataError: string | null;
 
@@ -38,13 +36,20 @@ interface AppState {
   setDataLoading: (loading: boolean) => void;
   setDataError: (error: string | null) => void;
   setWorkspaces: (workspaces: Workspace[]) => void;
+
+  /**
+   * Replace channels for a specific workspace without touching other workspaces' channels.
+   * Use this everywhere instead of setChannels to avoid cross-workspace state corruption.
+   */
+  mergeChannels: (workspaceId: string, channels: Channel[]) => void;
+
+  /** Replace the ENTIRE channel list (used only for full resets e.g. logout). */
   setChannels: (channels: Channel[]) => void;
-  setThreads: (threads: Thread[]) => void;
+
   setMessages: (messages: Message[]) => void;
 
-  setCurrentWorkspace: (id: string) => void;
-  setCurrentChannel: (id: string) => void;
-  setCurrentThread: (id: string | null) => void;
+  setCurrentWorkspace: (id: string | null) => void;
+  setCurrentChannel: (id: string | null) => void;
 
   addMessage: (message: Message) => void;
   updateMessage: (id: string, updates: Partial<Message>) => void;
@@ -65,21 +70,22 @@ interface AppState {
   updateThreadSettings: (settings: Partial<ThreadSettings>) => void;
 
   markChannelAsRead: (channelId: string) => void;
-  /** Add a thread from Supabase (e.g. after createThread in supabase-data). */
-  addThread: (thread: Thread) => void;
-  /** Legacy sync createThread: only updates local state; use supabase-data createThread + addThread for real. */
-  createThread: (channelId: string, title?: string) => Thread;
+
+  /** @deprecated Compatibility stub for thread-based code still in flight. */
+  setCurrentThread: (id: string | null) => void;
+  /** @deprecated Compatibility stub. */
+  setThreads: (threads: unknown[]) => void;
+  /** @deprecated Compatibility stub. */
+  addThread: (thread: unknown) => void;
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
   user: null,
   currentWorkspaceId: null,
   currentChannelId: null,
-  currentThreadId: null,
 
   workspaces: [],
   channels: [],
-  threads: [],
   messages: [],
   actions: [],
   contextItems: [],
@@ -104,29 +110,26 @@ export const useAppStore = create<AppState>((set, get) => ({
   setDataLoading: (dataLoading) => set({ dataLoading }),
   setDataError: (dataError) => set({ dataError }),
   setWorkspaces: (workspaces) => set({ workspaces }),
+
+  mergeChannels: (workspaceId, channels) =>
+    set((state) => ({
+      channels: [
+        ...state.channels.filter((c) => c.workspaceId !== workspaceId),
+        ...channels,
+      ],
+    })),
+
   setChannels: (channels) => set({ channels }),
-  setThreads: (threads) => set({ threads }),
   setMessages: (messages) => set({ messages }),
 
   setCurrentWorkspace: (id) => set({ currentWorkspaceId: id }),
   setCurrentChannel: (id) => {
-    const state = get();
-    const channelThreads = state.threads.filter((t) => t.channelId === id);
-    const latestThread = channelThreads.sort(
-      (a, b) => b.updatedAt.getTime() - a.updatedAt.getTime()
-    )[0];
-    set({
-      currentChannelId: id,
-      currentThreadId: latestThread?.id ?? null,
-    });
-    get().markChannelAsRead(id);
+    set({ currentChannelId: id });
+    if (id) get().markChannelAsRead(id);
   },
-  setCurrentThread: (id) => set({ currentThreadId: id }),
 
   addMessage: (message) =>
-    set((state) => ({
-      messages: [...state.messages, message],
-    })),
+    set((state) => ({ messages: [...state.messages, message] })),
 
   updateMessage: (id, updates) =>
     set((state) => ({
@@ -135,7 +138,9 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   appendToMessage: (id, content) =>
     set((state) => ({
-      messages: state.messages.map((m) => (m.id === id ? { ...m, content: m.content + content } : m)),
+      messages: state.messages.map((m) =>
+        m.id === id ? { ...m, content: m.content + content } : m
+      ),
     })),
 
   replaceMessage: (oldId, newMessage) =>
@@ -144,9 +149,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     })),
 
   addAction: (action) =>
-    set((state) => ({
-      actions: [...state.actions, action],
-    })),
+    set((state) => ({ actions: [...state.actions, action] })),
 
   updateAction: (id, updates) =>
     set((state) => ({
@@ -177,24 +180,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       ),
     })),
 
-  addThread: (thread) =>
-    set((state) => ({
-      threads: [thread, ...state.threads],
-      currentThreadId: thread.id,
-    })),
-
-  createThread: (channelId, title = 'Untitled thread') => {
-    const newThread: Thread = {
-      id: `th-local-${Date.now()}`,
-      channelId,
-      title,
-      updatedAt: new Date(),
-      messageCount: 0,
-    };
-    set((state) => ({
-      threads: [newThread, ...state.threads],
-      currentThreadId: newThread.id,
-    }));
-    return newThread;
-  },
+  // --- Compatibility stubs (thread concept removed) ---
+  setCurrentThread: () => {},
+  setThreads: () => {},
+  addThread: () => {},
 }));

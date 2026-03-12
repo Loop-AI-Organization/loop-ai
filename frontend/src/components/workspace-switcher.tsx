@@ -31,7 +31,6 @@ import { Label } from '@/components/ui/label';
 
 export function WorkspaceSwitcher() {
   const navigate = useNavigate();
-  const [creating, setCreating] = useState(false);
   const [switching, setSwitching] = useState(false);
 
   // Join dialog
@@ -43,6 +42,7 @@ export function WorkspaceSwitcher() {
   // Create dialog
   const [createOpen, setCreateOpen] = useState(false);
   const [newName, setNewName] = useState('');
+  const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
   // Rename dialog
@@ -58,43 +58,54 @@ export function WorkspaceSwitcher() {
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
-  const {
-    workspaces,
-    user,
-    currentWorkspaceId,
-    setCurrentWorkspace,
-    setWorkspaces,
-    setChannels,
-    setThreads,
-    setMessages,
-    setCurrentChannel,
-    setCurrentThread,
-  } = useAppStore();
-  const currentWorkspace = workspaces.find(w => w.id === currentWorkspaceId);
+  const { workspaces, user, currentWorkspaceId, setWorkspaces } = useAppStore();
+  const currentWorkspace = workspaces.find((w) => w.id === currentWorkspaceId);
+
+  // ── Helpers ───────────────────────────────────────────────────────────────
+
+  /**
+   * Get a channel to navigate to for a given workspace.
+   * Uses cached channels if available; fetches and caches them otherwise.
+   * Prefers "general", then the first channel.
+   */
+  const resolveWorkspaceChannel = async (
+    wsId: string
+  ): Promise<{ workspaceId: string; channelId: string } | null> => {
+    const state = useAppStore.getState();
+    let wsChannels = state.channels.filter((c) => c.workspaceId === wsId);
+
+    if (wsChannels.length === 0) {
+      wsChannels = await fetchChannels(wsId);
+      if (wsChannels.length > 0) {
+        // Cache without wiping other workspaces' channels.
+        useAppStore.getState().mergeChannels(wsId, wsChannels);
+      }
+    }
+
+    const target =
+      wsChannels.find((c) => c.name === 'general') ?? wsChannels[0] ?? null;
+    return target ? { workspaceId: wsId, channelId: target.id } : null;
+  };
+
+  // ── Workspace switching ───────────────────────────────────────────────────
 
   const handleSwitchWorkspace = async (workspace: { id: string }) => {
-    if (workspace.id === currentWorkspaceId) return;
+    if (workspace.id === currentWorkspaceId || switching) return;
     setSwitching(true);
     try {
-      setCurrentWorkspace(workspace.id);
-      const channels = await fetchChannels(workspace.id);
-      setChannels(channels);
-      setThreads([]);
-      setMessages([]);
-      setCurrentThread(null);
-      
-      const firstChannelId = channels[0]?.id;
-      if (firstChannelId) {
-        setCurrentChannel(firstChannelId);
-        navigate(`/app/${workspace.id}/${firstChannelId}`);
-      } else {
-        useAppStore.setState({ currentChannelId: null });
-        navigate('/app');
+      const dest = await resolveWorkspaceChannel(workspace.id);
+      if (dest) {
+        navigate(`/app/${dest.workspaceId}/${dest.channelId}`);
       }
+      // If the workspace has no channels yet, do nothing (user needs to create one).
+    } catch {
+      // ignore
     } finally {
       setSwitching(false);
     }
   };
+
+  // ── Create workspace ──────────────────────────────────────────────────────
 
   const handleCreateWorkspace = async () => {
     const name = newName.trim() || 'New Workspace';
@@ -104,14 +115,13 @@ export function WorkspaceSwitcher() {
     try {
       const workspace = await createWorkspace({ name });
       const channel = await createChannel(workspace.id, 'general');
-      setWorkspaces([...workspaces, workspace]);
-      setCurrentWorkspace(workspace.id);
-      setChannels([channel]);
-      setCurrentChannel(channel.id);
-      setThreads([]);
-      setMessages([]);
-      setCurrentThread(null);
-      
+
+      // Update workspaces list and cache the new channel.
+      useAppStore.setState((s) => ({
+        workspaces: [...s.workspaces, workspace],
+      }));
+      useAppStore.getState().mergeChannels(workspace.id, [channel]);
+
       setCreateOpen(false);
       setNewName('');
       navigate(`/app/${workspace.id}/${channel.id}`);
@@ -122,6 +132,8 @@ export function WorkspaceSwitcher() {
     }
   };
 
+  // ── Rename workspace ──────────────────────────────────────────────────────
+
   const handleRenameWorkspace = async () => {
     if (!renameId || renaming) return;
     const trimmed = renameName.trim();
@@ -130,7 +142,7 @@ export function WorkspaceSwitcher() {
     setRenameError(null);
     try {
       const updated = await updateWorkspace(renameId, { name: trimmed });
-      setWorkspaces(workspaces.map(w => w.id === renameId ? { ...w, name: updated.name } : w));
+      setWorkspaces(workspaces.map((w) => (w.id === renameId ? { ...w, name: updated.name } : w)));
       setRenameOpen(false);
       setRenameId(null);
       setRenameName('');
@@ -141,41 +153,37 @@ export function WorkspaceSwitcher() {
     }
   };
 
+  // ── Delete workspace ──────────────────────────────────────────────────────
+
   const handleDeleteWorkspace = async () => {
     if (!deleteId || deleting) return;
     setDeleting(true);
     setDeleteError(null);
     try {
       await deleteWorkspace(deleteId);
-      const remaining = workspaces.filter(w => w.id !== deleteId);
-      setWorkspaces(remaining);
+
+      const remaining = workspaces.filter((w) => w.id !== deleteId);
+      // Remove all channels for the deleted workspace.
+      useAppStore.setState((s) => ({
+        workspaces: remaining,
+        channels: s.channels.filter((c) => c.workspaceId !== deleteId),
+      }));
+
+      // If the deleted workspace was active, navigate away.
       if (currentWorkspaceId === deleteId) {
         if (remaining.length === 0) {
-          setChannels([]);
-          setThreads([]);
-          setMessages([]);
-          useAppStore.setState({ currentWorkspaceId: null, currentChannelId: null, currentThreadId: null });
+          useAppStore.setState({ currentWorkspaceId: null, currentChannelId: null, messages: [] });
           navigate('/app');
         } else {
-          const other = remaining[0];
-          const channels = await fetchChannels(other.id);
-          
-          setChannels(channels);
-          const firstChannelId = channels[0]?.id;
-          if (firstChannelId) {
-            
-            setCurrentThread(null);
-            setThreads([]);
-            setMessages([]);
-            navigate(`/app/${other.id}/${firstChannelId}`);
+          const dest = await resolveWorkspaceChannel(remaining[0].id);
+          if (dest) {
+            navigate(`/app/${dest.workspaceId}/${dest.channelId}`);
           } else {
-            setThreads([]);
-            setMessages([]);
-            useAppStore.setState({ currentChannelId: null, currentThreadId: null });
             navigate('/app');
           }
         }
       }
+
       setDeleteOpen(false);
       setDeleteId(null);
     } catch (e) {
@@ -185,6 +193,8 @@ export function WorkspaceSwitcher() {
     }
   };
 
+  // ── Join workspace by code ────────────────────────────────────────────────
+
   const handleJoinByCode = async () => {
     if (joining) return;
     const raw = joinCode.trim();
@@ -192,24 +202,20 @@ export function WorkspaceSwitcher() {
     setJoining(true);
     setJoinError(null);
     try {
-      const code = raw.toUpperCase();
-      const { workspace } = await joinWorkspaceByCode(code);
-      const without = workspaces.filter(w => w.id !== workspace.id);
-      setWorkspaces([...without, workspace]);
-      setCurrentWorkspace(workspace.id);
-      const channels = await fetchChannels(workspace.id);
-      setChannels(channels);
-      setThreads([]);
-      setMessages([]);
-      setCurrentThread(null);
-      const firstChannelId = channels[0]?.id;
-      if (firstChannelId) {
-        setCurrentChannel(firstChannelId);
-        navigate(`/app/${workspace.id}/${firstChannelId}`);
-      } else {
-        useAppStore.setState({ currentChannelId: null });
-        navigate('/app');
+      const { workspace } = await joinWorkspaceByCode(raw.toUpperCase());
+      // Dedupe and add workspace to the list.
+      useAppStore.setState((s) => ({
+        workspaces: [
+          ...s.workspaces.filter((w) => w.id !== workspace.id),
+          workspace,
+        ],
+      }));
+
+      const dest = await resolveWorkspaceChannel(workspace.id);
+      if (dest) {
+        navigate(`/app/${dest.workspaceId}/${dest.channelId}`);
       }
+
       setJoinOpen(false);
       setJoinCode('');
     } catch (e) {
@@ -219,15 +225,15 @@ export function WorkspaceSwitcher() {
     }
   };
 
-  const workspaceToDelete = workspaces.find(w => w.id === deleteId);
-  const workspaceToRename = workspaces.find(w => w.id === renameId);
+  const workspaceToDelete = workspaces.find((w) => w.id === deleteId);
+  const workspaceToRename = workspaces.find((w) => w.id === renameId);
 
   return (
     <>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button 
-            variant="ghost" 
+          <Button
+            variant="ghost"
             className="w-full justify-between px-3 py-2 h-auto hover:bg-sidebar-accent"
           >
             <div className="flex items-center gap-3">
@@ -236,9 +242,7 @@ export function WorkspaceSwitcher() {
                 <div className="font-medium text-sm text-sidebar-foreground truncate">
                   {currentWorkspace?.name || 'Select Workspace'}
                 </div>
-                <div className="text-2xs text-text-tertiary">
-                  Workspace
-                </div>
+                <div className="text-2xs text-text-tertiary">Workspace</div>
               </div>
             </div>
             <ChevronDown className="w-4 h-4 text-text-tertiary" />
@@ -248,10 +252,7 @@ export function WorkspaceSwitcher() {
           {workspaces.map((workspace) => {
             const isOwner = user && workspace.ownerId === user.id;
             return (
-              <div
-                key={workspace.id}
-                className="flex items-center group"
-              >
+              <div key={workspace.id} className="flex items-center group">
                 <DropdownMenuItem
                   onSelect={() => void handleSwitchWorkspace(workspace)}
                   disabled={switching}
@@ -340,9 +341,7 @@ export function WorkspaceSwitcher() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Create workspace</DialogTitle>
-            <DialogDescription>
-              Give your workspace a name. You can change it later.
-            </DialogDescription>
+            <DialogDescription>Give your workspace a name. You can change it later.</DialogDescription>
           </DialogHeader>
           <div className="space-y-2">
             <Label htmlFor="new-workspace-name">Workspace name</Label>
@@ -352,14 +351,12 @@ export function WorkspaceSwitcher() {
               onChange={(e) => setNewName(e.target.value)}
               placeholder="e.g. My Team"
               autoFocus
-              onKeyDown={(e) => e.key === 'Enter' && handleCreateWorkspace()}
+              onKeyDown={(e) => e.key === 'Enter' && void handleCreateWorkspace()}
             />
             {createError && <p className="text-sm text-destructive">{createError}</p>}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setCreateOpen(false)}>
-              Cancel
-            </Button>
+            <Button variant="outline" onClick={() => setCreateOpen(false)}>Cancel</Button>
             <Button onClick={() => void handleCreateWorkspace()} disabled={creating}>
               {creating ? 'Creating…' : 'Create'}
             </Button>
@@ -372,9 +369,7 @@ export function WorkspaceSwitcher() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Rename workspace</DialogTitle>
-            <DialogDescription>
-              Enter a new name for "{workspaceToRename?.name}".
-            </DialogDescription>
+            <DialogDescription>Enter a new name for "{workspaceToRename?.name}".</DialogDescription>
           </DialogHeader>
           <div className="space-y-2">
             <Label htmlFor="rename-workspace">New name</Label>
@@ -383,15 +378,16 @@ export function WorkspaceSwitcher() {
               value={renameName}
               onChange={(e) => setRenameName(e.target.value)}
               autoFocus
-              onKeyDown={(e) => e.key === 'Enter' && handleRenameWorkspace()}
+              onKeyDown={(e) => e.key === 'Enter' && void handleRenameWorkspace()}
             />
             {renameError && <p className="text-sm text-destructive">{renameError}</p>}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setRenameOpen(false)}>
-              Cancel
-            </Button>
-            <Button onClick={() => void handleRenameWorkspace()} disabled={renaming || !renameName.trim()}>
+            <Button variant="outline" onClick={() => setRenameOpen(false)}>Cancel</Button>
+            <Button
+              onClick={() => void handleRenameWorkspace()}
+              disabled={renaming || !renameName.trim()}
+            >
               {renaming ? 'Saving…' : 'Save'}
             </Button>
           </DialogFooter>
@@ -404,14 +400,13 @@ export function WorkspaceSwitcher() {
           <DialogHeader>
             <DialogTitle>Delete workspace</DialogTitle>
             <DialogDescription>
-              Are you sure you want to delete "{workspaceToDelete?.name}"? All channels, threads, and messages will be permanently deleted. This cannot be undone.
+              Are you sure you want to delete "{workspaceToDelete?.name}"? All channels and messages
+              will be permanently deleted. This cannot be undone.
             </DialogDescription>
           </DialogHeader>
           {deleteError && <p className="text-sm text-destructive">{deleteError}</p>}
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteOpen(false)}>
-              Cancel
-            </Button>
+            <Button variant="outline" onClick={() => setDeleteOpen(false)}>Cancel</Button>
             <Button
               variant="destructive"
               onClick={() => void handleDeleteWorkspace()}
@@ -437,14 +432,12 @@ export function WorkspaceSwitcher() {
               value={joinCode}
               onChange={(e) => setJoinCode(e.target.value)}
               placeholder="e.g. AB3F9K"
-              onKeyDown={(e) => e.key === 'Enter' && handleJoinByCode()}
+              onKeyDown={(e) => e.key === 'Enter' && void handleJoinByCode()}
             />
             {joinError && <p className="text-sm text-destructive">{joinError}</p>}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setJoinOpen(false)}>
-              Cancel
-            </Button>
+            <Button variant="outline" onClick={() => setJoinOpen(false)}>Cancel</Button>
             <Button onClick={() => void handleJoinByCode()} disabled={joining || !joinCode.trim()}>
               {joining ? 'Joining…' : 'Join'}
             </Button>
