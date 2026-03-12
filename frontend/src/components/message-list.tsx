@@ -7,19 +7,19 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
 export function MessageList() {
-  const { messages, currentThreadId, streamingMessageId } = useAppStore();
+  const { messages, currentChannelId, streamingMessageId } = useAppStore();
   const scrollRef = useRef<HTMLDivElement>(null);
   const [showJumpButton, setShowJumpButton] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
-  const threadMessages = messages.filter(m => m.threadId === currentThreadId);
+  const channelMessages = messages;
 
   // Simulate loading
   useEffect(() => {
     setIsLoading(true);
     const timer = setTimeout(() => setIsLoading(false), 300);
     return () => clearTimeout(timer);
-  }, [currentThreadId]);
+  }, [currentChannelId]);
 
   // Auto-scroll on new messages
   useEffect(() => {
@@ -31,7 +31,7 @@ export function MessageList() {
         }
       }, 50);
     }
-  }, [threadMessages.length, streamingMessageId, showJumpButton]);
+  }, [channelMessages.length, streamingMessageId, showJumpButton]);
 
   // Track scroll position
   const handleScroll = () => {
@@ -49,7 +49,7 @@ export function MessageList() {
   };
 
   // Empty state
-  if (!currentThreadId && !isLoading) {
+  if (!currentChannelId && !isLoading) {
     return (
       <div className="flex-1 flex items-center justify-center">
         <div className="text-center space-y-3">
@@ -57,7 +57,7 @@ export function MessageList() {
             <MessageSquare className="w-6 h-6 text-muted-foreground" />
           </div>
           <div>
-            <h3 className="font-medium text-foreground">No thread selected</h3>
+            <h3 className="font-medium text-foreground">No channel selected</h3>
             <p className="text-sm text-muted-foreground">
               Select a channel to start chatting
             </p>
@@ -76,7 +76,7 @@ export function MessageList() {
       >
         {isLoading ? (
           <MessageListSkeleton />
-        ) : threadMessages.length === 0 ? (
+        ) : channelMessages.length === 0 ? (
           <div className="flex items-center justify-center h-full">
             <div className="text-center space-y-3">
               <div className="w-12 h-12 rounded-xl bg-muted flex items-center justify-center mx-auto">
@@ -92,7 +92,7 @@ export function MessageList() {
           </div>
         ) : (
           <div className="divide-y divide-border">
-            {threadMessages.map((message) => (
+            {channelMessages.map((message) => (
               <MessageBubble
                 key={message.id}
                 message={message}

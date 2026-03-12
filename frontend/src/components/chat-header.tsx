@@ -1,44 +1,22 @@
-import { useState } from 'react';
-import { Search, Plus, PanelRightClose, PanelRightOpen, Menu, ChevronRight } from 'lucide-react';
+import { Search, PanelRightClose, PanelRightOpen, Menu, ChevronRight } from 'lucide-react';
 import { useAppStore } from '@/store/app-store';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { createThread as createThreadInSupabase } from '@/lib/supabase-data';
 
 export function ChatHeader() {
   const {
     workspaces,
     channels,
-    threads,
     currentWorkspaceId,
     currentChannelId,
-    currentThreadId,
     isInspectorOpen,
     toggleInspector,
     toggleSidebar,
     setCommandPaletteOpen,
-    addThread,
   } = useAppStore();
-  const [creating, setCreating] = useState(false);
 
   const currentWorkspace = workspaces.find((w) => w.id === currentWorkspaceId);
   const currentChannel = channels.find((c) => c.id === currentChannelId);
-  const currentThread = threads.find((t) => t.id === currentThreadId);
-
-  const handleNewThread = async () => {
-    if (!currentWorkspaceId || !currentChannelId) return;
-    setCreating(true);
-    try {
-      const thread = await createThreadInSupabase(
-        currentWorkspaceId,
-        currentChannelId,
-        'Untitled thread'
-      );
-      addThread(thread);
-    } finally {
-      setCreating(false);
-    }
-  };
 
   return (
     <header className="h-14 border-b border-border flex items-center justify-between px-4 bg-card flex-shrink-0">
@@ -58,14 +36,6 @@ export function ChatHeader() {
           <span className="text-muted-foreground">{currentWorkspace?.name}</span>
           <ChevronRight className="w-3.5 h-3.5 text-muted-foreground" />
           <span className="text-muted-foreground">{currentChannel?.name}</span>
-          {currentThread && (
-            <>
-              <ChevronRight className="w-3.5 h-3.5 text-muted-foreground" />
-              <span className="font-medium text-foreground truncate max-w-48">
-                {currentThread.title}
-              </span>
-            </>
-          )}
         </nav>
       </div>
 
@@ -82,18 +52,6 @@ export function ChatHeader() {
           />
           <kbd className="absolute right-2 top-1/2 -translate-y-1/2 kbd">⌘K</kbd>
         </div>
-
-        {/* New Thread */}
-        <Button
-          variant="outline"
-          size="sm"
-          className="gap-1.5"
-          onClick={handleNewThread}
-          disabled={creating || !currentChannelId}
-        >
-          <Plus className="w-4 h-4" />
-          <span className="hidden sm:inline">{creating ? 'Creating…' : 'New thread'}</span>
-        </Button>
 
         {/* Toggle Inspector */}
         <Button

@@ -1,8 +1,7 @@
 import { useState, useEffect } from 'react';
 import { X, FileText, Clock, Settings2, Brain, Bookmark, File, Download, Trash2 } from 'lucide-react';
 import { useAppStore } from '@/store/app-store';
-import { fetchThreadFiles } from '@/lib/supabase-data';
-import type { ThreadFile } from '@/types';
+import type { Action, ThreadFile } from '@/types';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -16,26 +15,18 @@ export function InspectorPanel() {
     isInspectorOpen, 
     toggleInspector, 
     actions, 
-    currentThreadId,
+    currentChannelId,
     contextItems,
     threadSettings,
     updateThreadSettings,
   } = useAppStore();
   const [threadFiles, setThreadFiles] = useState<ThreadFile[]>([]);
 
-  const threadActions = actions.filter(a => a.threadId === currentThreadId);
+  const threadActions = actions.filter(() => !!currentChannelId);
 
   useEffect(() => {
-    if (!currentThreadId) {
-      setThreadFiles([]);
-      return;
-    }
-    let cancelled = false;
-    fetchThreadFiles(currentThreadId).then((list) => {
-      if (!cancelled) setThreadFiles(list);
-    }).catch(() => {});
-    return () => { cancelled = true; };
-  }, [currentThreadId]);
+    setThreadFiles([]);
+  }, [currentChannelId]);
 
   if (!isInspectorOpen) return null;
 
@@ -87,7 +78,7 @@ export function InspectorPanel() {
             <ScrollArea className="h-full">
               <div className="p-4 space-y-3">
                 <p className="text-xs text-muted-foreground">
-                  Project memory and context loaded for this thread.
+                  Project memory and context loaded for this channel.
                 </p>
                 {contextItems.map((item) => (
                   <ContextCard key={item.id} item={item} />
@@ -123,7 +114,7 @@ export function InspectorPanel() {
             <ScrollArea className="h-full">
               <div className="p-4 space-y-3">
                 <p className="text-xs text-muted-foreground">
-                  Files uploaded to this thread.
+                  Files uploaded to this channel.
                 </p>
                 {threadFiles.length === 0 ? (
                   <div className="text-center py-8 text-muted-foreground text-sm">
@@ -154,7 +145,7 @@ export function InspectorPanel() {
             <ScrollArea className="h-full">
               <div className="p-4 space-y-6">
                 <p className="text-xs text-muted-foreground">
-                  Configure thread-specific settings.
+                  Configure channel-specific settings.
                 </p>
 
                 <div className="space-y-4">
@@ -232,21 +223,14 @@ function ContextCard({ item }: ContextCardProps) {
 }
 
 interface ActionTimelineItemProps {
-  action: {
-    id: string;
-    label: string;
-    status: 'queued' | 'running' | 'done' | 'error';
-    startedAt?: Date;
-    completedAt?: Date;
-    output?: string;
-  };
+  action: Action;
 }
 
 function ActionTimelineItem({ action }: ActionTimelineItemProps) {
   return (
     <div className="flex items-start gap-3 p-2 rounded-md hover:bg-muted/50">
       <div className="mt-0.5">
-        <ActionChip action={action as any} compact />
+        <ActionChip action={action} compact />
       </div>
       <div className="flex-1 min-w-0">
         <p className="text-sm font-medium truncate">{action.label}</p>

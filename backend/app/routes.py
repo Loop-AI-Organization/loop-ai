@@ -604,7 +604,7 @@ async def ws_chat(websocket: WebSocket):
 # --- AI Auto-Response for Group Chat (@ai mention) ---
 
 class TriageRequest(BaseModel):
-    thread_id: str
+    channel_id: str
     messages: List[dict]  # [{role, content}]
 
 
@@ -656,6 +656,51 @@ def _get_user_channels(uid: str) -> list[dict]:
     return result
 
 
+def _get_or_create_channel_thread(channel_id: str) -> str:
+    """
+    Compatibility helper while messages are still persisted against thread_id.
+    Resolve the most recently updated thread in a channel or create one.
+    """
+    existing = (
+        supabase.table("threads")
+        .select("id, workspace_id, channel_id, updated_at")
+        .eq("channel_id", channel_id)
+        .order("updated_at", desc=True)
+        .limit(1)
+        .execute()
+    )
+    if existing.data and len(existing.data) > 0:
+        return existing.data[0]["id"]
+
+    ch = (
+        supabase.table("channels")
+        .select("id, workspace_id")
+        .eq("id", channel_id)
+        .limit(1)
+        .execute()
+    )
+    if not ch.data or len(ch.data) == 0:
+        raise HTTPException(status_code=404, detail="Channel not found")
+    workspace_id = ch.data[0].get("workspace_id")
+
+    created = (
+        supabase.table("threads")
+        .insert(
+            {
+                "workspace_id": workspace_id,
+                "channel_id": channel_id,
+                "title": "Channel conversation",
+            }
+        )
+        .select("id")
+        .single()
+        .execute()
+    )
+    if not created.data or not created.data.get("id"):
+        raise HTTPException(status_code=500, detail="Failed to initialize channel conversation")
+    return created.data["id"]
+
+
 @router.post("/api/channels/{channel_id}/triage")
 async def respond_to_ai_mention(
     channel_id: str,
@@ -670,6 +715,8 @@ async def respond_to_ai_mention(
     uid = user.get("sub")
     if not uid:
         raise HTTPException(status_code=401, detail="Invalid user")
+    if body.channel_id != channel_id:
+        raise HTTPException(status_code=400, detail="channel_id mismatch")
 
     msgs = [
         {"role": m.get("role", "user"), "content": m.get("content", "")}
@@ -726,12 +773,13 @@ async def respond_to_ai_mention(
     if not response_content or not response_content.strip():
         return {"should_respond": True, "response": None, "reason": "Empty response from model"}
 
-    # Save assistant message to Supabase
+    # Save assistant message to Supabase (thread compatibility path)
     try:
+        thread_id = _get_or_create_channel_thread(body.channel_id)
         result = (
             supabase.table("messages")
             .insert({
-                "thread_id": body.thread_id,
+                "thread_id": thread_id,
                 "role": "assistant",
                 "content": response_content.strip(),
             })

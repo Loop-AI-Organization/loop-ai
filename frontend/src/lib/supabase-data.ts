@@ -423,6 +423,40 @@ export async function fetchThreads(channelId: string): Promise<Thread[]> {
   return (data as ThreadRow[]).map(toThread);
 }
 
+/** Compatibility helper: resolve most recent thread for a channel or create one. */
+async function getOrCreateChannelThreadId(channelId: string): Promise<string> {
+  const supabase = getSupabase();
+  const { data: existing, error: existingError } = await supabase
+    .from('threads')
+    .select('id, updated_at')
+    .eq('channel_id', channelId)
+    .order('updated_at', { ascending: false })
+    .limit(1);
+  if (existingError) throw existingError;
+  const existingId = (existing as Array<{ id: string }> | null)?.[0]?.id;
+  if (existingId) return existingId;
+
+  const { data: channelRow, error: channelError } = await supabase
+    .from('channels')
+    .select('workspace_id')
+    .eq('id', channelId)
+    .single();
+  if (channelError) throw channelError;
+
+  const { data: created, error: createError } = await supabase
+    .from('threads')
+    .insert({
+      workspace_id: (channelRow as { workspace_id: string }).workspace_id,
+      channel_id: channelId,
+      title: 'Channel conversation',
+      updated_at: new Date().toISOString(),
+    })
+    .select('id')
+    .single();
+  if (createError) throw createError;
+  return (created as { id: string }).id;
+}
+
 export async function createThread(workspaceId: string, channelId: string, title: string = 'Untitled'): Promise<Thread> {
   const supabase = getSupabase();
   const { data, error } = await supabase
@@ -448,8 +482,9 @@ export async function updateThreadTitle(threadId: string, title: string): Promis
   if (error) throw error;
 }
 
-export async function fetchMessages(threadId: string): Promise<Message[]> {
+export async function fetchMessages(channelId: string): Promise<Message[]> {
   const supabase = getSupabase();
+  const threadId = await getOrCreateChannelThreadId(channelId);
   const { data, error } = await supabase
     .from('messages')
     .select('id, thread_id, role, content, user_id, user_display_name, created_at')
@@ -489,8 +524,9 @@ export async function deleteChannel(channelId: string): Promise<void> {
   if (error) throw error;
 }
 
-export async function insertMessage(threadId: string, role: Message['role'], content: string): Promise<Message> {
+export async function insertMessage(channelId: string, role: Message['role'], content: string): Promise<Message> {
   const supabase = getSupabase();
+  const threadId = await getOrCreateChannelThreadId(channelId);
   const { data: { user } } = await supabase.auth.getUser();
   const isUser = role === 'user';
   const userId = isUser ? (user?.id ?? null) : null;
@@ -547,11 +583,12 @@ export async function fetchThreadFiles(threadId: string): Promise<ThreadFile[]> 
   return (data as ThreadFileRow[]).map(toThreadFile);
 }
 
-/** Upload a file to the thread: get signed URL from backend, upload, then insert thread_files row. */
-export async function uploadThreadFile(threadId: string, workspaceId: string, file: File): Promise<ThreadFile> {
+/** Upload a file to the active channel conversation (backed by channel thread). */
+export async function uploadThreadFile(channelId: string, workspaceId: string, file: File): Promise<ThreadFile> {
   const supabase = getSupabase();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Not authenticated');
+  const threadId = await getOrCreateChannelThreadId(channelId);
   const path = `${workspaceId}/${threadId}/${crypto.randomUUID()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
   const headers = await getAuthHeaders();
   const res = await fetch(`${API_URL}/api/signed-upload`, {
@@ -625,14 +662,13 @@ export interface TriageResult {
  */
 export async function triageAndRespond(
   channelId: string,
-  threadId: string,
   messages: Array<{ role: string; content: string }>
 ): Promise<TriageResult> {
   const headers = await getAuthHeaders();
   const res = await fetch(`${API_URL}/api/channels/${channelId}/triage`, {
     method: 'POST',
     headers,
-    body: JSON.stringify({ thread_id: threadId, messages }),
+    body: JSON.stringify({ channel_id: channelId, messages }),
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));

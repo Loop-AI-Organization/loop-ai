@@ -25,6 +25,7 @@ export interface Channel {
   avatar?: string;
 }
 
+/** @deprecated Legacy compatibility type while messages are still backed by thread rows. */
 export interface Thread {
   id: string;
   channelId: string;
@@ -35,6 +36,7 @@ export interface Thread {
 
 export interface Message {
   id: string;
+  /** @deprecated Internal compatibility ID; UI is channel-scoped. */
   threadId: string;
   role: 'user' | 'assistant' | 'system' | 'tool';
   content: string;
@@ -46,6 +48,7 @@ export interface Message {
 
 export interface Action {
   id: string;
+  /** @deprecated Internal compatibility ID; actions are displayed per channel flow. */
   threadId: string;
   label: string;
   status: 'queued' | 'running' | 'done' | 'error';

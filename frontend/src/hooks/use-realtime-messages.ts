@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useAppStore } from '@/store/app-store';
+import { fetchThreads } from '@/lib/supabase-data';
 import type { Message } from '@/types';
 
 interface MessageRow {
@@ -14,45 +15,56 @@ interface MessageRow {
 }
 
 export function useRealtimeMessages() {
-  const { currentThreadId, addMessage } = useAppStore();
+  const { currentChannelId, addMessage } = useAppStore();
 
   useEffect(() => {
-    if (!supabase || !currentThreadId) return;
+    if (!supabase || !currentChannelId) return;
+    let cancelled = false;
+    let threadIds = new Set<string>();
+    let channelRef: ReturnType<typeof supabase.channel> | null = null;
 
-    const channel = supabase
-      .channel(`messages-thread-${currentThreadId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'messages',
-          filter: `thread_id=eq.${currentThreadId}`,
-        },
-        (payload) => {
-          const row = payload.new as MessageRow;
-          if (!row || row.thread_id !== currentThreadId) return;
+    const start = async () => {
+      const threads = await fetchThreads(currentChannelId).catch(() => []);
+      if (cancelled) return;
+      threadIds = new Set(threads.map((t) => t.id));
 
-          const state = useAppStore.getState();
-          if (state.messages.some((m) => m.id === row.id)) return;
+      channelRef = supabase
+        .channel(`messages-channel-${currentChannelId}`)
+        .on(
+          'postgres_changes',
+          {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'messages',
+          },
+          (payload) => {
+            const row = payload.new as MessageRow;
+            if (!row || !threadIds.has(row.thread_id)) return;
 
-          const msg: Message = {
-            id: row.id,
-            threadId: row.thread_id,
-            role: row.role as Message['role'],
-            content: row.content,
-            createdAt: new Date(row.created_at),
-            userId: row.user_id ?? null,
-            userDisplayName: row.user_display_name ?? null,
-          };
-          addMessage(msg);
-        }
-      )
-      .subscribe();
+            const state = useAppStore.getState();
+            if (state.messages.some((m) => m.id === row.id)) return;
+
+            const msg: Message = {
+              id: row.id,
+              threadId: row.thread_id,
+              role: row.role as Message['role'],
+              content: row.content,
+              createdAt: new Date(row.created_at),
+              userId: row.user_id ?? null,
+              userDisplayName: row.user_display_name ?? null,
+            };
+            addMessage(msg);
+          }
+        )
+        .subscribe();
+    };
+
+    void start();
 
     return () => {
-      supabase && supabase.removeChannel(channel);
+      cancelled = true;
+      if (channelRef) supabase.removeChannel(channelRef);
     };
-  }, [currentThreadId, addMessage]);
+  }, [currentChannelId, addMessage]);
 }
 
