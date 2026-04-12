@@ -17,6 +17,8 @@ from loop_ai.orchestrator.orchestrator import (
     detect_navigation_intent,
     find_best_channel,
     generate_channel_summary,
+    detect_file_intent,
+    search_files,
 )
 
 router = APIRouter()
@@ -826,7 +828,77 @@ async def respond_to_ai_mention(
             "content": f"I couldn't find a channel matching \"{query}\". Try being more specific.",
         }
 
-    # --- Step 2: Normal AI response ---
+    # --- Step 2: Detect file intent ---
+    file_intent = await loop.run_in_executor(
+        None, lambda: detect_file_intent(messages=msgs)
+    )
+
+    if file_intent.get("is_file_intent") and file_intent.get("intent_type") == "find_file":
+        query = file_intent.get("query") or ""
+        ch_res = (
+            supabase.table("channels")
+            .select("workspace_id")
+            .eq("id", channel_id)
+            .execute()
+        )
+        workspace_id = ch_res.data[0]["workspace_id"] if ch_res.data else None
+        if workspace_id:
+            ws_id = workspace_id
+            q = query
+            found_files = await loop.run_in_executor(
+                None,
+                lambda w=ws_id, qv=q: search_files(workspace_id=w, query=qv),
+            )
+            if found_files:
+                file_markers = "\n".join(f':::file{{id="{f["id"]}"}}' for f in found_files)
+                content = (
+                    f'I found {len(found_files)} file(s) matching "{query}":\n\n{file_markers}'
+                )
+                try:
+                    result = (
+                        supabase.table("messages")
+                        .insert(
+                            {
+                                "thread_id": body.thread_id,
+                                "role": "assistant",
+                                "content": content,
+                            }
+                        )
+                        .execute()
+                    )
+                    saved = result.data[0] if result.data else None
+                except Exception:
+                    saved = None
+                return {
+                    "should_respond": True,
+                    "message_id": saved["id"] if saved else None,
+                    "content": content,
+                    "files": found_files,
+                }
+            else:
+                content = f"I couldn't find any files matching \"{query}\"."
+                try:
+                    result = (
+                        supabase.table("messages")
+                        .insert(
+                            {
+                                "thread_id": body.thread_id,
+                                "role": "assistant",
+                                "content": content,
+                            }
+                        )
+                        .execute()
+                    )
+                    saved = result.data[0] if result.data else None
+                except Exception:
+                    saved = None
+                return {
+                    "should_respond": True,
+                    "message_id": saved["id"] if saved else None,
+                    "content": content,
+                }
+
+    # --- Step 3: Normal AI response ---
     response_content = await loop.run_in_executor(
         None, lambda: generate_full_response(messages=msgs)
     )
