@@ -46,32 +46,140 @@ class WorkspaceMemberProfile(BaseModel):
 class RemoveMemberRequest(BaseModel):
     member_id: str
 
-class SignedUploadRequest(BaseModel):
-    path: str
-    expires_in: int = 900
+
+class FileUploadRequest(BaseModel):
+    workspace_id: str
+    channel_id: Optional[str] = None
+    file_name: str
+    content_type: str = "application/octet-stream"
+    file_size: int = 0
+
 
 @router.get("/health")
 async def health():
     return {"ok": True}
 
-@router.post("/api/signed-upload")
-async def signed_upload(
-    body: SignedUploadRequest,
-    _user: Annotated[dict, Depends(get_current_user)],
+
+@router.post("/api/files/upload")
+async def upload_file(
+    body: FileUploadRequest,
+    user: Annotated[dict, Depends(get_current_user)],
 ):
+    """Create a files row and return a signed upload URL."""
+    import uuid as _uuid
+
+    uid = user.get("sub")
+    if not uid:
+        raise HTTPException(status_code=401, detail="Invalid user")
+
+    ws = (
+        supabase.table("workspaces")
+        .select("id, user_id")
+        .eq("id", body.workspace_id)
+        .execute()
+    )
+    if not ws.data:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+    owner_id = ws.data[0].get("user_id")
+    if owner_id != uid:
+        members = (
+            supabase.table("workspace_members")
+            .select("user_id")
+            .eq("workspace_id", body.workspace_id)
+            .eq("user_id", uid)
+            .execute()
+        )
+        if not members.data:
+            raise HTTPException(status_code=403, detail="Not a member of this workspace")
+
+    safe_name = "".join(c if c.isalnum() or c in "._-" else "_" for c in body.file_name)
+    storage_path = f"{body.workspace_id}/uploads/{_uuid.uuid4()}-{safe_name}"
+
+    row = {
+        "workspace_id": body.workspace_id,
+        "source": "upload",
+        "storage_path": storage_path,
+        "file_name": body.file_name,
+        "file_size": body.file_size,
+        "content_type": body.content_type,
+        "created_by": uid,
+        "metadata_status": "pending",
+        "source_channel_id": body.channel_id,
+    }
+    result = supabase.table("files").insert(row).execute()
+    if not result.data:
+        raise HTTPException(status_code=500, detail="Failed to create file record")
+    file_id = result.data[0]["id"]
+
     bucket = "workspace-files"
     try:
         data = supabase.storage.from_(bucket).create_signed_upload_url(
-            body.path, expires_in=body.expires_in
+            storage_path, expires_in=900
         )
     except Exception as e:
-        raise HTTPException(
-            502,
-            f"Supabase storage error. Ensure bucket '{bucket}' exists in your project. Detail: {e!s}",
+        raise HTTPException(status_code=502, detail=f"Storage error: {e!s}")
+
+    signed_url = data.get("signedUrl") or data.get("signed_url") or data.get("url")
+    if not signed_url:
+        raise HTTPException(status_code=500, detail="Failed to create signed URL")
+
+    try:
+        enqueue_action(str(file_id), "enrich_file_metadata", action_id=None)
+    except Exception:
+        pass
+
+    return {"file_id": file_id, "signed_upload_url": signed_url}
+
+
+@router.get("/api/files/{file_id}/download")
+async def download_file(
+    file_id: str,
+    user: Annotated[dict, Depends(get_current_user)],
+):
+    """Return a signed download URL for a file."""
+    uid = user.get("sub")
+    if not uid:
+        raise HTTPException(status_code=401, detail="Invalid user")
+
+    file_res = (
+        supabase.table("files")
+        .select("id, workspace_id, storage_path")
+        .eq("id", file_id)
+        .execute()
+    )
+    if not file_res.data:
+        raise HTTPException(status_code=404, detail="File not found")
+    file_row = file_res.data[0]
+
+    workspace_id = file_row["workspace_id"]
+    ws = supabase.table("workspaces").select("id, user_id").eq("id", workspace_id).execute()
+    if not ws.data:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+    if ws.data[0]["user_id"] != uid:
+        members = (
+            supabase.table("workspace_members")
+            .select("user_id")
+            .eq("workspace_id", workspace_id)
+            .eq("user_id", uid)
+            .execute()
         )
-    if not data:
-        raise HTTPException(400, "Failed to create signed URL")
-    return data  # {signedUrl, token}
+        if not members.data:
+            raise HTTPException(status_code=403, detail="Not a member of this workspace")
+
+    bucket = "workspace-files"
+    try:
+        data = supabase.storage.from_(bucket).create_signed_url(
+            file_row["storage_path"], expires_in=300
+        )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Storage error: {e!s}")
+
+    url = data.get("signedURL") or data.get("signed_url") or data.get("signedUrl")
+    if not url:
+        raise HTTPException(status_code=500, detail="Failed to create download URL")
+
+    return {"url": url}
+
 
 class LogEventRequest(BaseModel):
     event_type: str = "sign_in"
