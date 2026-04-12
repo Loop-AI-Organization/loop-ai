@@ -19,6 +19,7 @@ from loop_ai.orchestrator.orchestrator import (
     generate_channel_summary,
     detect_file_intent,
     search_files,
+    generate_document,
 )
 
 router = APIRouter()
@@ -897,6 +898,52 @@ async def respond_to_ai_mention(
                     "message_id": saved["id"] if saved else None,
                     "content": content,
                 }
+
+    if file_intent.get("is_file_intent") and file_intent.get("intent_type") == "create_document":
+        ch_res = supabase.table("channels").select("workspace_id").eq("id", channel_id).execute()
+        workspace_id = ch_res.data[0]["workspace_id"] if ch_res.data else None
+        if workspace_id:
+            doc_title = file_intent.get("doc_title") or "Document"
+            time_range = file_intent.get("time_range_days") or 7
+            instructions = file_intent.get("instructions") or "summarize the key points"
+
+            generated = await loop.run_in_executor(
+                None,
+                lambda cid=channel_id,
+                wid=workspace_id,
+                dt=doc_title,
+                tr=int(time_range),
+                inst=instructions,
+                cb=uid: generate_document(
+                    channel_id=cid,
+                    workspace_id=wid,
+                    title=dt,
+                    time_range_days=tr,
+                    instructions=inst,
+                    created_by=cb,
+                ),
+            )
+            if generated:
+                file_marker = f':::file{{id="{generated["id"]}"}}'
+                content = f"I created \"{doc_title}\":\n\n{file_marker}"
+                try:
+                    result = supabase.table("messages").insert({
+                        "thread_id": body.thread_id,
+                        "role": "assistant",
+                        "content": content,
+                    }).execute()
+                    saved = result.data[0] if result.data else None
+                except Exception:
+                    saved = None
+                return {
+                    "should_respond": True,
+                    "message_id": saved["id"] if saved else None,
+                    "content": content,
+                    "files": [generated],
+                }
+            else:
+                content = "I couldn't generate the document — there may not be enough messages in the specified time range."
+                return {"should_respond": True, "content": content}
 
     # --- Step 3: Normal AI response ---
     response_content = await loop.run_in_executor(

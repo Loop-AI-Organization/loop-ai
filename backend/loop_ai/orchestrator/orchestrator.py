@@ -306,3 +306,132 @@ def search_files(
     scored = [(s, f) for s, f in scored if s > 0]
     scored.sort(key=lambda x: x[0], reverse=True)
     return [f for _, f in scored[:10]]
+
+
+_DOCUMENT_GEN_PROMPT = """\
+You are a document generator. Given recent chat messages from a channel, create a well-structured markdown document.
+
+Title: {title}
+Instructions: {instructions}
+
+Write a clean markdown document. Use headers, bullet points, and formatting as appropriate.
+Do NOT include preamble like "Here is the document" — just write the document content directly.\
+"""
+
+
+def generate_document(
+    *,
+    channel_id: str,
+    workspace_id: str,
+    title: str,
+    time_range_days: int = 7,
+    instructions: str = "summarize the key discussion points",
+    created_by: str,
+) -> Optional[Dict]:
+    """
+    Generate a markdown document from recent channel messages.
+    Uploads to storage and inserts a files row.
+    Returns the file record dict or None on failure.
+    """
+    from app.supabase_client import supabase
+    from datetime import datetime, timezone, timedelta
+    import uuid as _uuid
+
+    settings = load_settings()
+
+    # Fetch messages from channel within time range
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=time_range_days)).isoformat()
+    threads_res = supabase.table("threads").select("id").eq("channel_id", channel_id).execute()
+    thread_ids = [t["id"] for t in (threads_res.data or [])]
+    if not thread_ids:
+        return None
+
+    msgs_res = (
+        supabase.table("messages")
+        .select("role, content, created_at, user_display_name")
+        .in_("thread_id", thread_ids)
+        .gte("created_at", cutoff)
+        .order("created_at", desc=False)
+        .limit(200)
+        .execute()
+    )
+    messages = msgs_res.data or []
+    if not messages:
+        return None
+
+    # Format messages for LLM
+    context_lines = []
+    for m in messages:
+        author = m.get("user_display_name") or m.get("role", "user")
+        context_lines.append(f"[{author}]: {m.get('content', '')}")
+    context = "\n".join(context_lines)
+
+    prompt = _DOCUMENT_GEN_PROMPT.format(title=title, instructions=instructions)
+    llm_msgs = [
+        {"role": "system", "content": prompt},
+        {"role": "user", "content": f"Channel messages:\n\n{context}"},
+    ]
+
+    doc_content = chat_completion(
+        settings=settings,
+        messages=llm_msgs,
+        model=settings.openrouter_response_model,
+        max_tokens=2048,
+        temperature=0.3,
+    ).strip()
+
+    if not doc_content:
+        return None
+
+    # Generate summary and tags inline
+    meta_prompt = (
+        "Given this document, return JSON with: "
+        '{"summary": "one-line description", "tags": ["tag1", "tag2", "tag3"]}\n\n'
+        f"Document title: {title}\n\n{doc_content[:1000]}"
+    )
+    meta_raw = chat_completion(
+        settings=settings,
+        messages=[{"role": "user", "content": meta_prompt}],
+        model=settings.openrouter_triage_model,
+        max_tokens=64,
+        temperature=0.0,
+    )
+    try:
+        meta = json.loads(meta_raw.strip())
+    except Exception:
+        meta = {"summary": title, "tags": []}
+
+    # Upload markdown to storage
+    safe_title = "".join(c if c.isalnum() or c in "._- " else "_" for c in title).strip().replace(" ", "-")
+    file_name = f"{safe_title}.md"
+    storage_path = f"{workspace_id}/docs/{_uuid.uuid4()}-{file_name}"
+    bucket = "workspace-files"
+
+    try:
+        supabase.storage.from_(bucket).upload(
+            storage_path,
+            doc_content.encode("utf-8"),
+            {"content-type": "text/markdown"},
+        )
+    except Exception:
+        return None
+
+    # Insert files row
+    row = {
+        "workspace_id": workspace_id,
+        "source": "generated",
+        "storage_path": storage_path,
+        "file_name": file_name,
+        "file_size": len(doc_content.encode("utf-8")),
+        "content_type": "text/markdown",
+        "created_by": created_by,
+        "metadata_status": "ready",
+        "summary": meta.get("summary", title),
+        "tags": meta.get("tags", []),
+        "project_context": f"Generated from channel messages (last {time_range_days} days)",
+        "source_channel_id": channel_id,
+    }
+    result = supabase.table("files").insert(row).execute()
+    if not result.data:
+        return None
+    return result.data[0]
