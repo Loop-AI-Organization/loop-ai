@@ -172,9 +172,33 @@ export function Composer() {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file || !currentWorkspaceId) return;
+
+    let threadId = currentThreadId;
+
+    if (!threadId && currentChannelId) {
+      try {
+        const newThread = await createThreadInSupabase(
+          currentWorkspaceId,
+          currentChannelId,
+          file.name.slice(0, 50)
+        );
+        addThread(newThread);
+        threadId = newThread.id;
+      } catch {
+        return;
+      }
+    }
+
+    if (!threadId) return;
+
     setUploading(true);
     try {
-      await uploadFile(currentWorkspaceId, currentChannelId ?? null, file);
+      const uploaded = await uploadFile(currentWorkspaceId, currentChannelId ?? null, file);
+      const content = `:::file{id="${uploaded.id}"}`;
+      const msg = await insertMessageInSupabase(threadId, 'user', content);
+      addMessage({ ...msg, files: [uploaded] });
+    } catch (err) {
+      console.error('Upload failed:', err);
     } finally {
       setUploading(false);
     }
@@ -248,7 +272,11 @@ export function Composer() {
             size="icon"
             className="h-8 w-8"
             title="Attach file"
-            disabled={!currentThreadId || !currentWorkspaceId || uploading}
+            disabled={
+              !currentWorkspaceId ||
+              uploading ||
+              (!currentThreadId && !currentChannelId)
+            }
             onClick={handleAttachFile}
           >
             <Paperclip className="w-4 h-4 text-muted-foreground" />

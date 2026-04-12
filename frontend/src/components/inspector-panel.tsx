@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
-import { X, FileText, Clock, Settings2, Brain, Bookmark, File, Download, Trash2 } from 'lucide-react';
+import { X, FileText, Clock, Settings2, Brain, Bookmark, File } from 'lucide-react';
 import { useAppStore } from '@/store/app-store';
 import { fetchWorkspaceFiles } from '@/lib/supabase-data';
 import type { FileRecord } from '@/types';
+import { FileCard } from '@/components/file-card';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -18,30 +19,25 @@ export function InspectorPanel() {
     actions, 
     currentThreadId,
     currentWorkspaceId,
-    currentChannelId,
     contextItems,
     threadSettings,
     updateThreadSettings,
   } = useAppStore();
-  const [channelFiles, setChannelFiles] = useState<FileRecord[]>([]);
+  const [workspaceFiles, setWorkspaceFiles] = useState<FileRecord[]>([]);
 
   const threadActions = actions.filter(a => a.threadId === currentThreadId);
 
   useEffect(() => {
     if (!currentWorkspaceId) {
-      setChannelFiles([]);
+      setWorkspaceFiles([]);
       return;
     }
     let cancelled = false;
     fetchWorkspaceFiles(currentWorkspaceId).then((list) => {
-      if (cancelled) return;
-      const filtered = currentChannelId
-        ? list.filter((f) => f.sourceChannelId === currentChannelId)
-        : list;
-      setChannelFiles(filtered);
+      if (!cancelled) setWorkspaceFiles(list);
     }).catch(() => {});
     return () => { cancelled = true; };
-  }, [currentWorkspaceId, currentChannelId]);
+  }, [currentWorkspaceId]);
 
   if (!isInspectorOpen) return null;
 
@@ -129,25 +125,16 @@ export function InspectorPanel() {
             <ScrollArea className="h-full">
               <div className="p-4 space-y-3">
                 <p className="text-xs text-muted-foreground">
-                  Files uploaded in this channel.
+                  Files in this workspace.
                 </p>
-                {channelFiles.length === 0 ? (
+                {workspaceFiles.length === 0 ? (
                   <div className="text-center py-8 text-muted-foreground text-sm">
-                    No files uploaded
+                    No files yet
                   </div>
                 ) : (
                   <div className="space-y-2">
-                    {channelFiles.map((file) => (
-                      <FileCard
-                        key={file.id}
-                        file={{
-                          id: file.id,
-                          name: file.fileName,
-                          size: file.fileSize,
-                          type: file.contentType ?? '',
-                          uploadedAt: file.createdAt,
-                        }}
-                      />
+                    {workspaceFiles.map((file) => (
+                      <FileCard key={file.id} file={file} />
                     ))}
                   </div>
                 )}
@@ -274,44 +261,4 @@ function formatDuration(start?: Date, end?: Date): string {
   const ms = end.getTime() - start.getTime();
   if (ms < 1000) return `${ms}ms`;
   return `${(ms / 1000).toFixed(1)}s`;
-}
-
-interface FileCardProps {
-  file: {
-    id: string;
-    name: string;
-    size: number;
-    type: string;
-    uploadedAt: Date;
-  };
-}
-
-function FileCard({ file }: FileCardProps) {
-  return (
-    <div className="flex items-center gap-3 p-3 rounded-lg border border-border bg-muted/30">
-      <div className="w-8 h-8 rounded-md bg-muted flex items-center justify-center">
-        <File className="w-4 h-4 text-muted-foreground" />
-      </div>
-      <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium truncate">{file.name}</p>
-        <p className="text-2xs text-muted-foreground">
-          {formatFileSize(file.size)} • {file.uploadedAt.toLocaleDateString()}
-        </p>
-      </div>
-      <div className="flex items-center gap-1">
-        <Button variant="ghost" size="icon" className="h-7 w-7">
-          <Download className="w-3.5 h-3.5" />
-        </Button>
-        <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive">
-          <Trash2 className="w-3.5 h-3.5" />
-        </Button>
-      </div>
-    </div>
-  );
-}
-
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
