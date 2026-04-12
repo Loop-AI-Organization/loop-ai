@@ -146,6 +146,7 @@ export function Composer() {
           role: 'assistant',
           content: result.content,
           createdAt: new Date(),
+          files: result.files,
         };
         addMessage(assistantMessage);
       }

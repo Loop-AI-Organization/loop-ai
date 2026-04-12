@@ -66,7 +66,7 @@ export function AppShell() {
   
   // Get streaming/active actions for the current thread
   const activeActions = actions.filter(
-    (a) => a.threadId === currentThreadId && (a.status === 'running' || a.status === 'queued')
+    (a) => a.threadId === currentThreadId && (a.status === 'running' || a.status === 'pending')
   );
 
   if (dataLoading) {

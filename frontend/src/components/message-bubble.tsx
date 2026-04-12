@@ -2,8 +2,9 @@ import { cn } from '@/lib/utils';
 import type { FileRecord, Message } from '@/types';
 import { FileCard } from '@/components/file-card';
 import { User, Bot, Trash2 } from 'lucide-react';
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, useState } from 'react';
 import { useAppStore } from '@/store/app-store';
+import { getSupabase } from '@/lib/supabase';
 
 interface MessageBubbleProps {
   message: Message;
@@ -130,11 +131,13 @@ export function MessageBubble({ message, isStreaming }: MessageBubbleProps) {
   );
 }
 
-function MessageContent({ content, files }: { content: string; files?: FileRecord[] }) {
-  const FILE_MARKER_RE = /:::file\{id="([^"]+)"\}/g;
+const FILE_MARKER_RE = /:::file\{id="([^"]+)"\}/g;
+
+function parseFileMarkers(content: string) {
   const segments: Array<{ type: 'text'; text: string } | { type: 'file'; id: string }> = [];
   let lastIndex = 0;
   let match: RegExpExecArray | null;
+  FILE_MARKER_RE.lastIndex = 0;
 
   while ((match = FILE_MARKER_RE.exec(content)) !== null) {
     if (match.index > lastIndex) {
@@ -146,14 +149,61 @@ function MessageContent({ content, files }: { content: string; files?: FileRecor
   if (lastIndex < content.length) {
     segments.push({ type: 'text', text: content.slice(lastIndex) });
   }
+  return segments;
+}
 
-  const filesById = new Map((files || []).map((f) => [f.id, f]));
+function MessageContent({ content, files }: { content: string; files?: FileRecord[] }) {
+  const segments = parseFileMarkers(content);
+  const fileIds = segments.filter((s): s is { type: 'file'; id: string } => s.type === 'file').map((s) => s.id);
+
+  const [resolvedFiles, setResolvedFiles] = useState<Map<string, FileRecord>>(
+    () => new Map((files || []).map((f) => [f.id, f]))
+  );
+
+  useEffect(() => {
+    if (fileIds.length === 0) return;
+    const missing = fileIds.filter((id) => !resolvedFiles.has(id));
+    if (missing.length === 0) return;
+
+    let cancelled = false;
+    const supabase = getSupabase();
+    supabase
+      .from('files')
+      .select('*')
+      .in('id', missing)
+      .then(({ data }) => {
+        if (cancelled || !data) return;
+        setResolvedFiles((prev) => {
+          const next = new Map(prev);
+          for (const r of data) {
+            next.set(r.id, {
+              id: r.id,
+              workspaceId: r.workspace_id,
+              source: r.source,
+              storagePath: r.storage_path,
+              fileName: r.file_name,
+              fileSize: Number(r.file_size),
+              contentType: r.content_type,
+              createdBy: r.created_by,
+              createdAt: new Date(r.created_at),
+              summary: r.summary,
+              projectContext: r.project_context,
+              tags: r.tags,
+              metadataStatus: r.metadata_status,
+              sourceChannelId: r.source_channel_id,
+            });
+          }
+          return next;
+        });
+      });
+    return () => { cancelled = true; };
+  }, [content]);
 
   return (
     <>
       {segments.map((seg, idx) => {
         if (seg.type === 'file') {
-          const fileRecord = filesById.get(seg.id);
+          const fileRecord = resolvedFiles.get(seg.id);
           if (fileRecord) {
             return <FileCard key={`file-${idx}`} file={fileRecord} />;
           }

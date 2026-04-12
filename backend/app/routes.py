@@ -116,13 +116,11 @@ async def upload_file(
 
     bucket = "workspace-files"
     try:
-        data = supabase.storage.from_(bucket).create_signed_upload_url(
-            storage_path, expires_in=900
-        )
+        data = supabase.storage.from_(bucket).create_signed_upload_url(storage_path)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Storage error: {e!s}")
 
-    signed_url = data.get("signedUrl") or data.get("signed_url") or data.get("url")
+    signed_url = data.get("signed_url") or data.get("signedUrl") or data.get("url")
     if not signed_url:
         raise HTTPException(status_code=500, detail="Failed to create signed URL")
 
