@@ -5,7 +5,7 @@ import { useAppStore } from '@/store/app-store';
 import {
   createThread as createThreadInSupabase,
   insertMessage as insertMessageInSupabase,
-  uploadThreadFile,
+  uploadFile,
   triageAndRespond,
   fetchChannels,
   fetchThreads,
@@ -164,17 +164,17 @@ export function Composer() {
   };
 
   const handleAttachFile = () => {
-    if (!currentThreadId || !currentWorkspaceId) return;
+    if (!currentWorkspaceId) return;
     fileInputRef.current?.click();
   };
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = '';
-    if (!file || !currentThreadId || !currentWorkspaceId) return;
+    if (!file || !currentWorkspaceId) return;
     setUploading(true);
     try {
-      await uploadThreadFile(currentThreadId, currentWorkspaceId, file);
+      await uploadFile(currentWorkspaceId, currentChannelId ?? null, file);
     } finally {
       setUploading(false);
     }

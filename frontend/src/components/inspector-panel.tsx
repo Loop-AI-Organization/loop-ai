@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
 import { X, FileText, Clock, Settings2, Brain, Bookmark, File, Download, Trash2 } from 'lucide-react';
 import { useAppStore } from '@/store/app-store';
-import { fetchThreadFiles } from '@/lib/supabase-data';
-import type { ThreadFile } from '@/types';
+import { fetchWorkspaceFiles } from '@/lib/supabase-data';
+import type { FileRecord } from '@/types';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -17,25 +17,31 @@ export function InspectorPanel() {
     toggleInspector, 
     actions, 
     currentThreadId,
+    currentWorkspaceId,
+    currentChannelId,
     contextItems,
     threadSettings,
     updateThreadSettings,
   } = useAppStore();
-  const [threadFiles, setThreadFiles] = useState<ThreadFile[]>([]);
+  const [channelFiles, setChannelFiles] = useState<FileRecord[]>([]);
 
   const threadActions = actions.filter(a => a.threadId === currentThreadId);
 
   useEffect(() => {
-    if (!currentThreadId) {
-      setThreadFiles([]);
+    if (!currentWorkspaceId) {
+      setChannelFiles([]);
       return;
     }
     let cancelled = false;
-    fetchThreadFiles(currentThreadId).then((list) => {
-      if (!cancelled) setThreadFiles(list);
+    fetchWorkspaceFiles(currentWorkspaceId).then((list) => {
+      if (cancelled) return;
+      const filtered = currentChannelId
+        ? list.filter((f) => f.sourceChannelId === currentChannelId)
+        : list;
+      setChannelFiles(filtered);
     }).catch(() => {});
     return () => { cancelled = true; };
-  }, [currentThreadId]);
+  }, [currentWorkspaceId, currentChannelId]);
 
   if (!isInspectorOpen) return null;
 
@@ -123,15 +129,15 @@ export function InspectorPanel() {
             <ScrollArea className="h-full">
               <div className="p-4 space-y-3">
                 <p className="text-xs text-muted-foreground">
-                  Files uploaded to this thread.
+                  Files uploaded in this channel.
                 </p>
-                {threadFiles.length === 0 ? (
+                {channelFiles.length === 0 ? (
                   <div className="text-center py-8 text-muted-foreground text-sm">
                     No files uploaded
                   </div>
                 ) : (
                   <div className="space-y-2">
-                    {threadFiles.map((file) => (
+                    {channelFiles.map((file) => (
                       <FileCard
                         key={file.id}
                         file={{
@@ -235,7 +241,7 @@ interface ActionTimelineItemProps {
   action: {
     id: string;
     label: string;
-    status: 'queued' | 'running' | 'done' | 'error';
+    status: 'pending' | 'running' | 'completed' | 'failed';
     startedAt?: Date;
     completedAt?: Date;
     output?: string;
