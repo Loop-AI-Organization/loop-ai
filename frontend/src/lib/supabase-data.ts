@@ -5,7 +5,7 @@
 import { getSupabase, getAuthHeaders } from '@/lib/supabase';
 import type { Workspace, Channel, Thread, Message, WorkspaceMember, FileRecord } from '@/types';
 
-const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:4000';
+const API_URL = import.meta.env.VITE_API_URL ?? 'https://api.loopai-project.me';
 
 // --- DB row types (snake_case) ---
 interface WorkspaceRow {
