@@ -200,6 +200,7 @@ def generate_full_response(*, messages: List[Dict[str, str]]) -> str:
         model=settings.openrouter_response_model,
         max_tokens=settings.openrouter_max_tokens,
         temperature=settings.openrouter_temperature,
+        timeout=180.0,
     )
 
     return response

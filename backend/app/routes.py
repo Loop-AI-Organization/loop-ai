@@ -1,6 +1,7 @@
 from typing import Annotated, Optional, List
 import asyncio
 import json
+import logging
 import random
 import string
 import httpx
@@ -23,6 +24,7 @@ from loop_ai.orchestrator.orchestrator import (
 )
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 class InviteMemberRequest(BaseModel):
@@ -775,10 +777,23 @@ async def respond_to_ai_mention(
     Handle an @ai mention in a channel. First checks if it's a navigation request
     (e.g. "take me to the channel about bills"). If so, returns a navigation result.
     Otherwise generates a normal AI response.
+
+    Note: This handler runs LLM + Supabase work in a thread pool; it does not enqueue
+    the main response to Redis/RQ. Jobs are only enqueued after a successful reply
+    (e.g. channel summary). For queue verification use POST /api/actions or monitor
+    after the request completes.
     """
     uid = user.get("sub")
     if not uid:
         raise HTTPException(status_code=401, detail="Invalid user")
+
+    logger.info(
+        "triage start channel_id=%s thread_id=%s uid=%s message_count=%s",
+        channel_id,
+        body.thread_id,
+        uid,
+        len(body.messages) if isinstance(body.messages, list) else 0,
+    )
 
     msgs = [
         {"role": m.get("role", "user"), "content": m.get("content", "")}
@@ -794,12 +809,15 @@ async def respond_to_ai_mention(
     loop = asyncio.get_running_loop()
 
     # --- Step 1: Detect navigation intent ---
+    logger.info("triage phase=navigation_intent channel_id=%s", channel_id)
     nav_intent = await loop.run_in_executor(
         None, lambda: detect_navigation_intent(messages=msgs)
     )
+    logger.info("triage phase=navigation_intent_done is_navigation=%s", nav_intent.get("is_navigation"))
 
     if nav_intent.get("is_navigation") and nav_intent.get("query"):
         query = nav_intent["query"]
+        logger.info("triage phase=navigation_match query=%s", query[:200] if query else "")
         channels = await loop.run_in_executor(None, lambda: _get_user_channels(uid))
         if not channels:
             return {
@@ -809,6 +827,7 @@ async def respond_to_ai_mention(
         match = await loop.run_in_executor(
             None, lambda: find_best_channel(query=query, channels=channels)
         )
+        logger.info("triage phase=navigation_match_done channel_id_match=%s", match.get("channel_id"))
         if match.get("channel_id"):
             return {
                 "should_respond": False,
@@ -828,8 +847,14 @@ async def respond_to_ai_mention(
         }
 
     # --- Step 2: Detect file intent ---
+    logger.info("triage phase=file_intent channel_id=%s", channel_id)
     file_intent = await loop.run_in_executor(
         None, lambda: detect_file_intent(messages=msgs)
+    )
+    logger.info(
+        "triage phase=file_intent_done is_file_intent=%s intent_type=%s",
+        file_intent.get("is_file_intent"),
+        file_intent.get("intent_type"),
     )
 
     if file_intent.get("is_file_intent") and file_intent.get("intent_type") == "find_file":
@@ -944,8 +969,13 @@ async def respond_to_ai_mention(
                 return {"should_respond": True, "content": content}
 
     # --- Step 3: Normal AI response ---
+    logger.info("triage phase=generate_full_response channel_id=%s", channel_id)
     response_content = await loop.run_in_executor(
         None, lambda: generate_full_response(messages=msgs)
+    )
+    logger.info(
+        "triage phase=generate_full_response_done chars=%s",
+        len(response_content) if response_content else 0,
     )
 
     if not response_content or not response_content.strip():
@@ -967,10 +997,12 @@ async def respond_to_ai_mention(
         raise HTTPException(status_code=500, detail=f"Failed to save AI response: {e}")
 
     # Trigger async summary regeneration for this channel (fire-and-forget)
-    asyncio.get_event_loop().run_in_executor(
+    loop.run_in_executor(
         None,
         lambda: _maybe_enqueue_summary(channel_id),
     )
+
+    logger.info("triage complete channel_id=%s message_id=%s", channel_id, saved_message["id"] if saved_message else None)
 
     return {
         "should_respond": True,

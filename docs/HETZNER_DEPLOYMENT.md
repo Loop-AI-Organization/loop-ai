@@ -71,10 +71,9 @@ If this is a private repo, use SSH instead of HTTPS.
 
 ---
 
-### 4. Create the backend `.env` file
+### 4. Create the repo root `.env` file
 
-Still in `loop-ai/backend`, create a `./.env` file based on `backend/.env.example`.
-You can copy values from your **root `.env`** on your local machine.
+`docker-compose.prod.yml` loads **`../.env`** (the file at **`loop-ai/.env`**, one level above `backend/`). Create or edit that file based on [`backend/.env.example`](backend/.env.example) so both `api` and `worker` receive secrets without maintaining a separate `backend/.env`.
 
 Minimum variables:
 
@@ -138,6 +137,8 @@ Later you can put Nginx/Caddy in front for HTTPS and map a domain like
 `https://api.loop-ai.yourdomain.com`, but HTTP on port 4000 is enough to get
 the project working.
 
+If Nginx sits in front of the API, raise proxy timeouts for long `@ai` requests; otherwise the browser may show a pending request until Nginx closes it (check `/var/log/nginx/error.log` for `upstream timed out`). Copy directives from [`backend/deploy/nginx-api-timeouts.conf.example`](../backend/deploy/nginx-api-timeouts.conf.example) into your `location` block for the API.
+
 ---
 
 ### 6. Point Vercel frontend to the Hetzner backend
@@ -183,6 +184,15 @@ In Supabase dashboard:
   ```bash
   docker compose -f docker-compose.prod.yml logs api --tail=200
   docker compose -f docker-compose.prod.yml logs worker --tail=200
+  ```
+
+  `@ai` triage logs phases as `triage phase=...` on the `api` service so you can see whether the hang is before navigation, file intent, or full response generation.
+
+- **Verify env and Redis queue from a container**:
+
+  ```bash
+  docker compose -f docker-compose.prod.yml exec api printenv | egrep 'REDIS_URL|OPENROUTER_'
+  docker compose -f docker-compose.prod.yml exec api python scripts/smoke_rq_enqueue.py
   ```
 
 - **Stop the stack**:
