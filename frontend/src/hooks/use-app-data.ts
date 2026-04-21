@@ -60,22 +60,56 @@ export function useAppData() {
     async function initialHydrate() {
       setDataError(null);
       try {
-        const { workspace, channel } = await ensureDefaultWorkspaceAndChannel();
+        const { workspace: ensuredWorkspace, channel: ensuredChannel } = await ensureDefaultWorkspaceAndChannel();
         if (cancelled) return;
 
         const workspaces = await fetchWorkspaces();
         if (cancelled) return;
 
+        // Preserve current selection where possible (for remounts/navigation)
+        const initialState = useAppStore.getState();
+        const workspace =
+          workspaces.find((w) => w.id === initialState.currentWorkspaceId) ??
+          workspaces.find((w) => w.id === ensuredWorkspace.id) ??
+          workspaces[0];
+
+        if (!workspace) {
+          useAppStore.setState({
+            workspaces: [],
+            channels: [],
+            messages: [],
+            currentWorkspaceId: null,
+            currentChannelId: null,
+          });
+          return;
+        }
+
         const channels = await fetchChannels(workspace.id);
         if (cancelled) return;
+
+        const channel =
+          channels.find((c) => c.id === initialState.currentChannelId) ??
+          channels.find((c) => c.id === ensuredChannel.id) ??
+          channels[0];
+
+        if (!channel) {
+          useAppStore.setState({
+            workspaces,
+            channels,
+            messages: [],
+            currentWorkspaceId: workspace.id,
+            currentChannelId: null,
+          });
+          return;
+        }
 
         const messages = await fetchMessages(channel.id);
         if (cancelled) return;
 
-        // Batch-write to store so there is only one render
+        // Batch-write to minimize renders during initial bootstrap.
         useAppStore.setState({
           workspaces,
-          channels,       // only default workspace channels; others load on demand
+          channels,
           messages,
           currentWorkspaceId: workspace.id,
           currentChannelId: channel.id,

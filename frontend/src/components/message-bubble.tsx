@@ -1,8 +1,10 @@
 import { cn } from '@/lib/utils';
-import type { Message } from '@/types';
+import type { FileRecord, Message } from '@/types';
+import { FileCard } from '@/components/file-card';
 import { User, Bot, Trash2 } from 'lucide-react';
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, useState } from 'react';
 import { useAppStore } from '@/store/app-store';
+import { getSupabase } from '@/lib/supabase';
 
 interface MessageBubbleProps {
   message: Message;
@@ -120,7 +122,7 @@ export function MessageBubble({ message, isStreaming }: MessageBubbleProps) {
                   : 'text-foreground prose-headings:text-foreground prose-strong:text-foreground prose-code:text-foreground prose-code:bg-muted prose-pre:bg-surface-sunken prose-pre:border prose-pre:border-border'
               )}
             >
-              <MessageContent content={message.content} />
+              <MessageContent content={message.content} files={message.files} />
             </div>
           </div>
         </div>
@@ -129,7 +131,91 @@ export function MessageBubble({ message, isStreaming }: MessageBubbleProps) {
   );
 }
 
-function MessageContent({ content }: { content: string }) {
+const FILE_MARKER_RE = /:::file\{id="([^"]+)"\}/g;
+
+function parseFileMarkers(content: string) {
+  const segments: Array<{ type: 'text'; text: string } | { type: 'file'; id: string }> = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  FILE_MARKER_RE.lastIndex = 0;
+
+  while ((match = FILE_MARKER_RE.exec(content)) !== null) {
+    if (match.index > lastIndex) {
+      segments.push({ type: 'text', text: content.slice(lastIndex, match.index) });
+    }
+    segments.push({ type: 'file', id: match[1] });
+    lastIndex = FILE_MARKER_RE.lastIndex;
+  }
+  if (lastIndex < content.length) {
+    segments.push({ type: 'text', text: content.slice(lastIndex) });
+  }
+  return segments;
+}
+
+function MessageContent({ content, files }: { content: string; files?: FileRecord[] }) {
+  const segments = parseFileMarkers(content);
+  const fileIds = segments.filter((s): s is { type: 'file'; id: string } => s.type === 'file').map((s) => s.id);
+
+  const [resolvedFiles, setResolvedFiles] = useState<Map<string, FileRecord>>(
+    () => new Map((files || []).map((f) => [f.id, f]))
+  );
+
+  useEffect(() => {
+    if (fileIds.length === 0) return;
+    const missing = fileIds.filter((id) => !resolvedFiles.has(id));
+    if (missing.length === 0) return;
+
+    let cancelled = false;
+    const supabase = getSupabase();
+    supabase
+      .from('files')
+      .select('*')
+      .in('id', missing)
+      .then(({ data }) => {
+        if (cancelled || !data) return;
+        setResolvedFiles((prev) => {
+          const next = new Map(prev);
+          for (const r of data) {
+            next.set(r.id, {
+              id: r.id,
+              workspaceId: r.workspace_id,
+              source: r.source,
+              storagePath: r.storage_path,
+              fileName: r.file_name,
+              fileSize: Number(r.file_size),
+              contentType: r.content_type,
+              createdBy: r.created_by,
+              createdAt: new Date(r.created_at),
+              summary: r.summary,
+              projectContext: r.project_context,
+              tags: r.tags,
+              metadataStatus: r.metadata_status,
+              sourceChannelId: r.source_channel_id,
+            });
+          }
+          return next;
+        });
+      });
+    return () => { cancelled = true; };
+  }, [content]);
+
+  return (
+    <>
+      {segments.map((seg, idx) => {
+        if (seg.type === 'file') {
+          const fileRecord = resolvedFiles.get(seg.id);
+          if (fileRecord) {
+            return <FileCard key={`file-${idx}`} file={fileRecord} />;
+          }
+          return null;
+        }
+        return <TextContent key={`text-${idx}`} content={seg.text} />;
+      })}
+    </>
+  );
+}
+
+function TextContent({ content }: { content: string }) {
   // Simple markdown rendering
   const lines = content.split('\n');
   const elements: React.ReactNode[] = [];
@@ -251,12 +337,37 @@ function MessageContent({ content }: { content: string }) {
 }
 
 function InlineFormatting({ text }: { text: string }) {
-  // Bold
-  let formatted = text.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-  // Inline code
-  formatted = formatted.replace(/`([^`]+)`/g, '<code class="bg-muted px-1 py-0.5 rounded text-sm">$1</code>');
-  
-  return <span dangerouslySetInnerHTML={{ __html: formatted }} />;
+  // Parse inline formatting into safe React elements (no dangerouslySetInnerHTML)
+  const parts: React.ReactNode[] = [];
+  // Match **bold** and `code` patterns
+  const regex = /(\*\*([^*]+)\*\*|`([^`]+)`)/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = regex.exec(text)) !== null) {
+    // Add text before this match
+    if (match.index > lastIndex) {
+      parts.push(text.slice(lastIndex, match.index));
+    }
+    if (match[2]) {
+      // Bold
+      parts.push(<strong key={match.index}>{match[2]}</strong>);
+    } else if (match[3]) {
+      // Inline code
+      parts.push(
+        <code key={match.index} className="bg-muted px-1 py-0.5 rounded text-sm">
+          {match[3]}
+        </code>
+      );
+    }
+    lastIndex = regex.lastIndex;
+  }
+  // Add remaining text
+  if (lastIndex < text.length) {
+    parts.push(text.slice(lastIndex));
+  }
+
+  return <span>{parts}</span>;
 }
 
 function formatTime(date: Date): string {

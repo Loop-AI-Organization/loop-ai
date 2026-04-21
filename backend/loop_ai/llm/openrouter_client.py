@@ -126,6 +126,7 @@ def chat_completion(
     model: Optional[str] = None,
     max_tokens: int = 16,
     temperature: float = 0.0,
+    timeout: Optional[float] = 30.0,
 ) -> str:
     """
     Non-streaming chat completion. Returns the full response text.
@@ -150,7 +151,7 @@ def chat_completion(
         "messages": messages,
     }
 
-    with httpx.Client(timeout=30) as client:
+    with httpx.Client(timeout=timeout) as client:
         resp = client.post(OPENROUTER_CHAT_COMPLETIONS_URL, headers=headers, json=payload)
 
     if resp.status_code >= 400:

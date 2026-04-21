@@ -1,6 +1,7 @@
 from typing import Annotated, Optional, List
 import asyncio
 import json
+import logging
 import random
 import string
 import httpx
@@ -17,9 +18,13 @@ from loop_ai.orchestrator.orchestrator import (
     detect_navigation_intent,
     find_best_channel,
     generate_channel_summary,
+    detect_file_intent,
+    search_files,
+    generate_document,
 )
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 class InviteMemberRequest(BaseModel):
@@ -46,32 +51,138 @@ class WorkspaceMemberProfile(BaseModel):
 class RemoveMemberRequest(BaseModel):
     member_id: str
 
-class SignedUploadRequest(BaseModel):
-    path: str
-    expires_in: int = 900
+
+class FileUploadRequest(BaseModel):
+    workspace_id: str
+    channel_id: Optional[str] = None
+    file_name: str
+    content_type: str = "application/octet-stream"
+    file_size: int = 0
+
 
 @router.get("/health")
 async def health():
     return {"ok": True}
 
-@router.post("/api/signed-upload")
-async def signed_upload(
-    body: SignedUploadRequest,
-    _user: Annotated[dict, Depends(get_current_user)],
+
+@router.post("/api/files/upload")
+async def upload_file(
+    body: FileUploadRequest,
+    user: Annotated[dict, Depends(get_current_user)],
 ):
+    """Create a files row and return a signed upload URL."""
+    import uuid as _uuid
+
+    uid = user.get("sub")
+    if not uid:
+        raise HTTPException(status_code=401, detail="Invalid user")
+
+    ws = (
+        supabase.table("workspaces")
+        .select("id, user_id")
+        .eq("id", body.workspace_id)
+        .execute()
+    )
+    if not ws.data:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+    owner_id = ws.data[0].get("user_id")
+    if owner_id != uid:
+        members = (
+            supabase.table("workspace_members")
+            .select("user_id")
+            .eq("workspace_id", body.workspace_id)
+            .eq("user_id", uid)
+            .execute()
+        )
+        if not members.data:
+            raise HTTPException(status_code=403, detail="Not a member of this workspace")
+
+    safe_name = "".join(c if c.isalnum() or c in "._-" else "_" for c in body.file_name)
+    storage_path = f"{body.workspace_id}/uploads/{_uuid.uuid4()}-{safe_name}"
+
+    row = {
+        "workspace_id": body.workspace_id,
+        "source": "upload",
+        "storage_path": storage_path,
+        "file_name": body.file_name,
+        "file_size": body.file_size,
+        "content_type": body.content_type,
+        "created_by": uid,
+        "metadata_status": "pending",
+        "source_channel_id": body.channel_id,
+    }
+    result = supabase.table("files").insert(row).execute()
+    if not result.data:
+        raise HTTPException(status_code=500, detail="Failed to create file record")
+    file_id = result.data[0]["id"]
+
     bucket = "workspace-files"
     try:
-        data = supabase.storage.from_(bucket).create_signed_upload_url(
-            body.path, expires_in=body.expires_in
+        data = supabase.storage.from_(bucket).create_signed_upload_url(storage_path)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Storage error: {e!s}")
+
+    signed_url = data.get("signed_url") or data.get("signedUrl") or data.get("url")
+    if not signed_url:
+        raise HTTPException(status_code=500, detail="Failed to create signed URL")
+
+    try:
+        enqueue_action(str(file_id), "enrich_file_metadata", action_id=None)
+    except Exception:
+        pass
+
+    return {"file_id": file_id, "signed_upload_url": signed_url}
+
+
+@router.get("/api/files/{file_id}/download")
+async def download_file(
+    file_id: str,
+    user: Annotated[dict, Depends(get_current_user)],
+):
+    """Return a signed download URL for a file."""
+    uid = user.get("sub")
+    if not uid:
+        raise HTTPException(status_code=401, detail="Invalid user")
+
+    file_res = (
+        supabase.table("files")
+        .select("id, workspace_id, storage_path")
+        .eq("id", file_id)
+        .execute()
+    )
+    if not file_res.data:
+        raise HTTPException(status_code=404, detail="File not found")
+    file_row = file_res.data[0]
+
+    workspace_id = file_row["workspace_id"]
+    ws = supabase.table("workspaces").select("id, user_id").eq("id", workspace_id).execute()
+    if not ws.data:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+    if ws.data[0]["user_id"] != uid:
+        members = (
+            supabase.table("workspace_members")
+            .select("user_id")
+            .eq("workspace_id", workspace_id)
+            .eq("user_id", uid)
+            .execute()
+        )
+        if not members.data:
+            raise HTTPException(status_code=403, detail="Not a member of this workspace")
+
+    bucket = "workspace-files"
+    try:
+        data = supabase.storage.from_(bucket).create_signed_url(
+            file_row["storage_path"], expires_in=300
         )
     except Exception as e:
-        raise HTTPException(
-            502,
-            f"Supabase storage error. Ensure bucket '{bucket}' exists in your project. Detail: {e!s}",
-        )
-    if not data:
-        raise HTTPException(400, "Failed to create signed URL")
-    return data  # {signedUrl, token}
+        raise HTTPException(status_code=502, detail=f"Storage error: {e!s}")
+
+    url = data.get("signedURL") or data.get("signed_url") or data.get("signedUrl")
+    if not url:
+        raise HTTPException(status_code=500, detail="Failed to create download URL")
+
+    return {"url": url}
+
 
 class LogEventRequest(BaseModel):
     event_type: str = "sign_in"
@@ -711,12 +822,25 @@ async def respond_to_ai_mention(
     Handle an @ai mention in a channel. First checks if it's a navigation request
     (e.g. "take me to the channel about bills"). If so, returns a navigation result.
     Otherwise generates a normal AI response.
+
+    Note: This handler runs LLM + Supabase work in a thread pool; it does not enqueue
+    the main response to Redis/RQ. Jobs are only enqueued after a successful reply
+    (e.g. channel summary). For queue verification use POST /api/actions or monitor
+    after the request completes.
     """
     uid = user.get("sub")
     if not uid:
         raise HTTPException(status_code=401, detail="Invalid user")
     if body.channel_id != channel_id:
         raise HTTPException(status_code=400, detail="channel_id mismatch")
+
+    logger.info(
+        "triage start channel_id=%s thread_id=%s uid=%s message_count=%s",
+        channel_id,
+        body.thread_id,
+        uid,
+        len(body.messages) if isinstance(body.messages, list) else 0,
+    )
 
     msgs = [
         {"role": m.get("role", "user"), "content": m.get("content", "")}
@@ -732,12 +856,15 @@ async def respond_to_ai_mention(
     loop = asyncio.get_running_loop()
 
     # --- Step 1: Detect navigation intent ---
+    logger.info("triage phase=navigation_intent channel_id=%s", channel_id)
     nav_intent = await loop.run_in_executor(
         None, lambda: detect_navigation_intent(messages=msgs)
     )
+    logger.info("triage phase=navigation_intent_done is_navigation=%s", nav_intent.get("is_navigation"))
 
     if nav_intent.get("is_navigation") and nav_intent.get("query"):
         query = nav_intent["query"]
+        logger.info("triage phase=navigation_match query=%s", query[:200] if query else "")
         channels = await loop.run_in_executor(None, lambda: _get_user_channels(uid))
         if not channels:
             return {
@@ -747,6 +874,7 @@ async def respond_to_ai_mention(
         match = await loop.run_in_executor(
             None, lambda: find_best_channel(query=query, channels=channels)
         )
+        logger.info("triage phase=navigation_match_done channel_id_match=%s", match.get("channel_id"))
         if match.get("channel_id"):
             return {
                 "should_respond": False,
@@ -765,9 +893,136 @@ async def respond_to_ai_mention(
             "content": f"I couldn't find a channel matching \"{query}\". Try being more specific.",
         }
 
-    # --- Step 2: Normal AI response ---
+    # --- Step 2: Detect file intent ---
+    logger.info("triage phase=file_intent channel_id=%s", channel_id)
+    file_intent = await loop.run_in_executor(
+        None, lambda: detect_file_intent(messages=msgs)
+    )
+    logger.info(
+        "triage phase=file_intent_done is_file_intent=%s intent_type=%s",
+        file_intent.get("is_file_intent"),
+        file_intent.get("intent_type"),
+    )
+
+    if file_intent.get("is_file_intent") and file_intent.get("intent_type") == "find_file":
+        query = file_intent.get("query") or ""
+        ch_res = (
+            supabase.table("channels")
+            .select("workspace_id")
+            .eq("id", channel_id)
+            .execute()
+        )
+        workspace_id = ch_res.data[0]["workspace_id"] if ch_res.data else None
+        if workspace_id:
+            ws_id = workspace_id
+            q = query
+            found_files = await loop.run_in_executor(
+                None,
+                lambda w=ws_id, qv=q: search_files(workspace_id=w, query=qv),
+            )
+            if found_files:
+                file_markers = "\n".join(f':::file{{id="{f["id"]}"}}' for f in found_files)
+                content = (
+                    f'I found {len(found_files)} file(s) matching "{query}":\n\n{file_markers}'
+                )
+                try:
+                    result = (
+                        supabase.table("messages")
+                        .insert(
+                            {
+                                "thread_id": body.thread_id,
+                                "role": "assistant",
+                                "content": content,
+                            }
+                        )
+                        .execute()
+                    )
+                    saved = result.data[0] if result.data else None
+                except Exception:
+                    saved = None
+                return {
+                    "should_respond": True,
+                    "message_id": saved["id"] if saved else None,
+                    "content": content,
+                    "files": found_files,
+                }
+            else:
+                content = f"I couldn't find any files matching \"{query}\"."
+                try:
+                    result = (
+                        supabase.table("messages")
+                        .insert(
+                            {
+                                "thread_id": body.thread_id,
+                                "role": "assistant",
+                                "content": content,
+                            }
+                        )
+                        .execute()
+                    )
+                    saved = result.data[0] if result.data else None
+                except Exception:
+                    saved = None
+                return {
+                    "should_respond": True,
+                    "message_id": saved["id"] if saved else None,
+                    "content": content,
+                }
+
+    if file_intent.get("is_file_intent") and file_intent.get("intent_type") == "create_document":
+        ch_res = supabase.table("channels").select("workspace_id").eq("id", channel_id).execute()
+        workspace_id = ch_res.data[0]["workspace_id"] if ch_res.data else None
+        if workspace_id:
+            doc_title = file_intent.get("doc_title") or "Document"
+            time_range = file_intent.get("time_range_days") or 7
+            instructions = file_intent.get("instructions") or "summarize the key points"
+
+            generated = await loop.run_in_executor(
+                None,
+                lambda cid=channel_id,
+                wid=workspace_id,
+                dt=doc_title,
+                tr=int(time_range),
+                inst=instructions,
+                cb=uid: generate_document(
+                    channel_id=cid,
+                    workspace_id=wid,
+                    title=dt,
+                    time_range_days=tr,
+                    instructions=inst,
+                    created_by=cb,
+                ),
+            )
+            if generated:
+                file_marker = f':::file{{id="{generated["id"]}"}}'
+                content = f"I created \"{doc_title}\":\n\n{file_marker}"
+                try:
+                    result = supabase.table("messages").insert({
+                        "thread_id": body.thread_id,
+                        "role": "assistant",
+                        "content": content,
+                    }).execute()
+                    saved = result.data[0] if result.data else None
+                except Exception:
+                    saved = None
+                return {
+                    "should_respond": True,
+                    "message_id": saved["id"] if saved else None,
+                    "content": content,
+                    "files": [generated],
+                }
+            else:
+                content = "I couldn't generate the document — there may not be enough messages in the specified time range."
+                return {"should_respond": True, "content": content}
+
+    # --- Step 3: Normal AI response ---
+    logger.info("triage phase=generate_full_response channel_id=%s", channel_id)
     response_content = await loop.run_in_executor(
         None, lambda: generate_full_response(messages=msgs)
+    )
+    logger.info(
+        "triage phase=generate_full_response_done chars=%s",
+        len(response_content) if response_content else 0,
     )
 
     if not response_content or not response_content.strip():
@@ -790,10 +1045,12 @@ async def respond_to_ai_mention(
         raise HTTPException(status_code=500, detail=f"Failed to save AI response: {e}")
 
     # Trigger async summary regeneration for this channel (fire-and-forget)
-    asyncio.get_event_loop().run_in_executor(
+    loop.run_in_executor(
         None,
         lambda: _maybe_enqueue_summary(channel_id),
     )
+
+    logger.info("triage complete channel_id=%s message_id=%s", channel_id, saved_message["id"] if saved_message else None)
 
     return {
         "should_respond": True,

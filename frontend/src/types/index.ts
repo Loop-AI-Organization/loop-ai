@@ -34,6 +34,23 @@ export interface Thread {
   messageCount: number;
 }
 
+export interface FileRecord {
+  id: string;
+  workspaceId: string;
+  source: 'upload' | 'generated';
+  storagePath: string;
+  fileName: string;
+  fileSize: number;
+  contentType: string | null;
+  createdBy: string | null;
+  createdAt: Date;
+  summary: string | null;
+  projectContext: string | null;
+  tags: string[] | null;
+  metadataStatus: 'pending' | 'ready' | 'failed';
+  sourceChannelId: string | null;
+}
+
 export interface Message {
   id: string;
   /** @deprecated Internal compatibility ID; UI is channel-scoped. */
@@ -44,6 +61,7 @@ export interface Message {
   userId?: string | null;
   userDisplayName?: string | null;
   isStreaming?: boolean;
+  files?: FileRecord[];
 }
 
 export interface Action {
@@ -51,7 +69,7 @@ export interface Action {
   /** @deprecated Internal compatibility ID; actions are displayed per channel flow. */
   threadId: string;
   label: string;
-  status: 'queued' | 'running' | 'done' | 'error';
+  status: 'pending' | 'running' | 'completed' | 'failed';
   startedAt?: Date;
   completedAt?: Date;
   output?: string;
@@ -89,15 +107,4 @@ export interface FileItem {
   type: string;
   uploadedAt: Date;
   url: string;
-}
-
-export interface ThreadFile {
-  id: string;
-  threadId: string;
-  storagePath: string;
-  fileName: string;
-  fileSize: number;
-  contentType: string | null;
-  uploadedBy: string;
-  createdAt: Date;
 }

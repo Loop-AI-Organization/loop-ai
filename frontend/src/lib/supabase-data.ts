@@ -3,9 +3,9 @@
  * All queries run with the current user's session; RLS enforces per-user access.
  */
 import { getSupabase, getAuthHeaders } from '@/lib/supabase';
-import type { Workspace, Channel, Thread, Message, WorkspaceMember, ThreadFile } from '@/types';
+import type { Workspace, Channel, Thread, Message, WorkspaceMember, FileRecord } from '@/types';
 
-const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:4000';
+const API_URL = import.meta.env.VITE_API_URL ?? 'https://api.loopai-project.me';
 
 // --- DB row types (snake_case) ---
 interface WorkspaceRow {
@@ -547,79 +547,103 @@ export async function insertMessage(channelId: string, role: Message['role'], co
   return toMessage(data as MessageRow);
 }
 
-// --- Thread files ---
-interface ThreadFileRow {
+// --- Files ---
+interface FileRow {
   id: string;
-  thread_id: string;
+  workspace_id: string;
+  source: 'upload' | 'generated';
   storage_path: string;
   file_name: string;
   file_size: number;
   content_type: string | null;
-  uploaded_by: string;
+  created_by: string | null;
   created_at: string;
+  summary: string | null;
+  project_context: string | null;
+  tags: string[] | null;
+  metadata_status: 'pending' | 'ready' | 'failed';
+  source_channel_id: string | null;
 }
 
-function toThreadFile(r: ThreadFileRow): ThreadFile {
+function toFileRecord(r: FileRow): FileRecord {
   return {
     id: r.id,
-    threadId: r.thread_id,
+    workspaceId: r.workspace_id,
+    source: r.source,
     storagePath: r.storage_path,
     fileName: r.file_name,
     fileSize: Number(r.file_size),
     contentType: r.content_type,
-    uploadedBy: r.uploaded_by,
+    createdBy: r.created_by,
     createdAt: new Date(r.created_at),
+    summary: r.summary,
+    projectContext: r.project_context,
+    tags: r.tags,
+    metadataStatus: r.metadata_status,
+    sourceChannelId: r.source_channel_id,
   };
 }
 
-export async function fetchThreadFiles(threadId: string): Promise<ThreadFile[]> {
+export async function fetchWorkspaceFiles(workspaceId: string): Promise<FileRecord[]> {
   const supabase = getSupabase();
   const { data, error } = await supabase
-    .from('thread_files')
-    .select('id, thread_id, storage_path, file_name, file_size, content_type, uploaded_by, created_at')
-    .eq('thread_id', threadId)
+    .from('files')
+    .select('*')
+    .eq('workspace_id', workspaceId)
     .order('created_at', { ascending: false });
   if (error) throw error;
-  return (data as ThreadFileRow[]).map(toThreadFile);
+  return (data as FileRow[]).map(toFileRecord);
 }
 
-/** Upload a file to the active channel conversation (backed by channel thread). */
-export async function uploadThreadFile(channelId: string, workspaceId: string, file: File): Promise<ThreadFile> {
-  const supabase = getSupabase();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('Not authenticated');
-  const threadId = await getOrCreateChannelThreadId(channelId);
-  const path = `${workspaceId}/${threadId}/${crypto.randomUUID()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+export async function uploadFile(
+  workspaceId: string,
+  channelId: string | null,
+  file: File
+): Promise<FileRecord> {
   const headers = await getAuthHeaders();
-  const res = await fetch(`${API_URL}/api/signed-upload`, {
+  const res = await fetch(`${API_URL}/api/files/upload`, {
     method: 'POST',
     headers,
-    body: JSON.stringify({ path, expires_in: 900 }),
+    body: JSON.stringify({
+      workspace_id: workspaceId,
+      channel_id: channelId,
+      file_name: file.name,
+      content_type: file.type || 'application/octet-stream',
+      file_size: file.size,
+    }),
   });
-  if (!res.ok) throw new Error('Failed to get upload URL');
+  if (!res.ok) throw new Error('Failed to initiate upload');
   const payload = await res.json();
-  const uploadUrl = payload.signedUrl ?? payload.url ?? payload.token;
-  if (!uploadUrl) throw new Error('Invalid signed upload response');
+  const uploadUrl: string = payload.signed_upload_url;
+  const fileId: string = payload.file_id;
+
   const putRes = await fetch(uploadUrl, {
     method: 'PUT',
     body: file,
     headers: { 'Content-Type': file.type || 'application/octet-stream' },
   });
   if (!putRes.ok) throw new Error('Upload failed');
+
+  // Fetch the created file record
+  const supabase = getSupabase();
   const { data, error } = await supabase
-    .from('thread_files')
-    .insert({
-      thread_id: threadId,
-      storage_path: path,
-      file_name: file.name,
-      file_size: file.size,
-      content_type: file.type || null,
-      uploaded_by: user.id,
-    })
-    .select('id, thread_id, storage_path, file_name, file_size, content_type, uploaded_by, created_at')
+    .from('files')
+    .select('*')
+    .eq('id', fileId)
     .single();
   if (error) throw error;
-  return toThreadFile(data as ThreadFileRow);
+  return toFileRecord(data as FileRow);
+}
+
+export async function getFileDownloadUrl(fileId: string): Promise<string> {
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${API_URL}/api/files/${fileId}/download`, {
+    method: 'GET',
+    headers,
+  });
+  if (!res.ok) throw new Error('Failed to get download URL');
+  const body = await res.json();
+  return body.url as string;
 }
 
 export async function ensureDefaultWorkspaceAndChannel(): Promise<{ workspace: Workspace; channel: Channel }> {
@@ -654,6 +678,7 @@ export interface TriageResult {
   content?: string;
   reason?: string;
   navigation?: NavigationResult;
+  files?: FileRecord[];
 }
 
 /**
@@ -691,5 +716,6 @@ export async function triageAndRespond(
           reason: nav.reason,
         }
       : undefined,
+    files: data.files?.map((f: FileRow) => toFileRecord(f)),
   };
 }

@@ -37,10 +37,10 @@ export function ActionChip({ action, compact }: ActionChipProps) {
     <div
       className={cn(
         'inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md border transition-all',
-        action.status === 'queued' && 'bg-muted border-border text-muted-foreground',
+        action.status === 'pending' && 'bg-muted border-border text-muted-foreground',
         action.status === 'running' && 'bg-accent-info/10 border-accent-info/30 text-accent-info',
-        action.status === 'done' && 'bg-accent-success/10 border-accent-success/30 text-accent-success',
-        action.status === 'error' && 'bg-accent-error/10 border-accent-error/30 text-accent-error'
+        action.status === 'completed' && 'bg-accent-success/10 border-accent-success/30 text-accent-success',
+        action.status === 'failed' && 'bg-accent-error/10 border-accent-error/30 text-accent-error'
       )}
     >
       <StatusIcon status={action.status} Icon={Icon} />
@@ -57,13 +57,13 @@ function StatusIcon({
   Icon: React.ComponentType<{ className?: string }>;
 }) {
   switch (status) {
-    case 'queued':
+    case 'pending':
       return <Icon className="w-3 h-3" />;
     case 'running':
       return <Loader2 className="w-3 h-3 animate-spin" />;
-    case 'done':
+    case 'completed':
       return <Check className="w-3 h-3" />;
-    case 'error':
+    case 'failed':
       return <AlertCircle className="w-3 h-3" />;
   }
 }
@@ -74,7 +74,7 @@ interface ActionChipsBarProps {
 
 export function ActionChipsBar({ actions }: ActionChipsBarProps) {
   const visibleActions = actions.filter(a => 
-    a.status === 'running' || a.status === 'queued'
+    a.status === 'running' || a.status === 'pending'
   ).slice(0, 4);
 
   if (visibleActions.length === 0) return null;

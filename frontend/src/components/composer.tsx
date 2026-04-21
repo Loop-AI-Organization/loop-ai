@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '@/store/app-store';
 import {
   insertMessage as insertMessageInSupabase,
-  uploadThreadFile,
+  uploadFile,
   triageAndRespond,
 } from '@/lib/supabase-data';
 import { Button } from '@/components/ui/button';
@@ -101,6 +101,7 @@ export function Composer() {
           role: 'assistant',
           content: result.content,
           createdAt: new Date(),
+          files: result.files,
         };
         addMessage(assistantMessage);
       }
@@ -127,10 +128,15 @@ export function Composer() {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file || !currentChannelId || !currentWorkspaceId) return;
+
     setUploading(true);
     try {
-      // Compatibility path: uploads still use the backing channel thread internally.
-      await uploadThreadFile(currentChannelId, currentWorkspaceId, file);
+      const uploaded = await uploadFile(currentWorkspaceId, currentChannelId, file);
+      const content = `:::file{id="${uploaded.id}"}`;
+      const msg = await insertMessageInSupabase(currentChannelId, 'user', content);
+      addMessage({ ...msg, files: [uploaded] });
+    } catch (err) {
+      console.error('Upload failed:', err);
     } finally {
       setUploading(false);
     }

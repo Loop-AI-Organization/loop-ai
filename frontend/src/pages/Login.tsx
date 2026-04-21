@@ -28,7 +28,7 @@ export default function Login() {
       setError(signInError.message ?? 'Invalid email or password');
       return;
     }
-    const apiUrl = import.meta.env.VITE_API_URL ?? 'http://localhost:4000';
+    const apiUrl = import.meta.env.VITE_API_URL ?? 'https://api.loopai-project.me';
     try {
       const headers = await getAuthHeaders();
       await fetch(`${apiUrl}/api/auth/log-event`, {

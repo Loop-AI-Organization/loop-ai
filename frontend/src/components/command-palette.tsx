@@ -29,7 +29,6 @@ export function CommandPalette() {
   const [membersError, setMembersError] = useState<string | null>(null);
   const [startingDmFor, setStartingDmFor] = useState<string | null>(null);
 
-  // Reset search when opening
   useEffect(() => {
     if (isCommandPaletteOpen) {
       setSearch('');
@@ -38,9 +37,11 @@ export function CommandPalette() {
 
   useEffect(() => {
     if (!isCommandPaletteOpen || !currentWorkspaceId) return;
+
     let cancelled = false;
     setLoadingMembers(true);
     setMembersError(null);
+
     listDmCandidates(currentWorkspaceId)
       .then((members) => {
         if (!cancelled) setDmMembers(members);
@@ -60,26 +61,36 @@ export function CommandPalette() {
     };
   }, [isCommandPaletteOpen, currentWorkspaceId]);
 
-  const workspaceChannels = useMemo(() => 
-    channels.filter(c => c.workspaceId === currentWorkspaceId),
+  const workspaceChannels = useMemo(
+    () => channels.filter((c) => c.workspaceId === currentWorkspaceId),
     [channels, currentWorkspaceId]
   );
 
-  const filteredChannels = useMemo(() => {
-    if (!search) return workspaceChannels;
-    return workspaceChannels.filter(c => 
-      c.name.toLowerCase().includes(search.toLowerCase())
-    );
-  }, [workspaceChannels, search]);
+  const normalizedSearch = useMemo(() => search.trim().toLowerCase(), [search]);
+
+  const filteredProjectChannels = useMemo(() => {
+    return workspaceChannels.filter((c) => {
+      if (c.type !== 'project') return false;
+      if (!normalizedSearch) return true;
+      return c.name.toLowerCase().includes(normalizedSearch);
+    });
+  }, [workspaceChannels, normalizedSearch]);
+
+  const filteredDmChannels = useMemo(() => {
+    return workspaceChannels.filter((c) => {
+      if (c.type !== 'dm') return false;
+      if (!normalizedSearch) return true;
+      return c.name.toLowerCase().includes(normalizedSearch);
+    });
+  }, [workspaceChannels, normalizedSearch]);
 
   const filteredMembers = useMemo(() => {
-    const query = search.trim().toLowerCase();
-    if (!query) return dmMembers;
+    if (!normalizedSearch) return dmMembers;
     return dmMembers.filter((member) => {
       const haystack = `${member.displayName ?? ''} ${member.email ?? ''}`.toLowerCase();
-      return haystack.includes(query);
+      return haystack.includes(normalizedSearch);
     });
-  }, [dmMembers, search]);
+  }, [dmMembers, normalizedSearch]);
 
   const handleChannelSelect = (channelId: string) => {
     setCommandPaletteOpen(false);
@@ -92,6 +103,7 @@ export function CommandPalette() {
     if (!currentWorkspaceId || startingDmFor) return;
     setStartingDmFor(otherUserId);
     setMembersError(null);
+
     try {
       const channel = await launchDirectMessage(currentWorkspaceId, otherUserId);
       setCommandPaletteOpen(false);
@@ -103,26 +115,27 @@ export function CommandPalette() {
     }
   };
 
+  const hasProjectChannels = filteredProjectChannels.length > 0;
+  const hasDmChannels = filteredDmChannels.length > 0;
+
   return (
-    <CommandDialog 
-      open={isCommandPaletteOpen} 
-      onOpenChange={setCommandPaletteOpen}
-    >
-      <CommandInput 
-        placeholder="Search channels or type a command..." 
+    <CommandDialog open={isCommandPaletteOpen} onOpenChange={setCommandPaletteOpen}>
+      <CommandInput
+        placeholder="Search channels, DMs, or commands..."
         value={search}
         onValueChange={setSearch}
       />
       <CommandList>
         <CommandEmpty>No results found.</CommandEmpty>
 
-        {/* Quick Actions */}
         <CommandGroup heading="Quick Actions">
-          <CommandItem onSelect={() => {
-            const composer = document.querySelector('[data-composer-input]') as HTMLTextAreaElement;
-            composer?.focus();
-            setCommandPaletteOpen(false);
-          }}>
+          <CommandItem
+            onSelect={() => {
+              const composer = document.querySelector('[data-composer-input]') as HTMLTextAreaElement;
+              composer?.focus();
+              setCommandPaletteOpen(false);
+            }}
+          >
             <ArrowRight className="mr-2 h-4 w-4" />
             <span>Focus Composer</span>
             <kbd className="ml-auto kbd">⌘/</kbd>
@@ -131,7 +144,6 @@ export function CommandPalette() {
 
         <CommandSeparator />
 
-        {/* Direct messages */}
         <CommandGroup heading="Start Direct Message">
           {loadingMembers ? (
             <CommandItem disabled>
@@ -158,6 +170,7 @@ export function CommandPalette() {
               <span>No members found.</span>
             </CommandItem>
           )}
+
           {membersError && (
             <CommandItem disabled>
               <span>{membersError}</span>
@@ -165,29 +178,41 @@ export function CommandPalette() {
           )}
         </CommandGroup>
 
-        <CommandSeparator />
+        {(hasProjectChannels || hasDmChannels) && <CommandSeparator />}
 
-        {/* Channels */}
-        <CommandGroup heading="Channels">
-          {filteredChannels.map((channel) => (
-            <CommandItem 
-              key={channel.id}
-              onSelect={() => handleChannelSelect(channel.id)}
-            >
-              {channel.type === 'project' ? (
+        {hasProjectChannels && (
+          <CommandGroup heading="Channels">
+            {filteredProjectChannels.map((channel) => (
+              <CommandItem key={channel.id} onSelect={() => handleChannelSelect(channel.id)}>
                 <Hash className="mr-2 h-4 w-4" />
-              ) : (
+                <span>#{' '}{channel.name}</span>
+                {channel.unreadCount > 0 && (
+                  <span className="ml-auto min-w-5 h-5 px-1.5 rounded-full bg-primary text-primary-foreground text-2xs font-medium flex items-center justify-center">
+                    {channel.unreadCount}
+                  </span>
+                )}
+              </CommandItem>
+            ))}
+          </CommandGroup>
+        )}
+
+        {hasProjectChannels && hasDmChannels && <CommandSeparator />}
+
+        {hasDmChannels && (
+          <CommandGroup heading="Direct Messages">
+            {filteredDmChannels.map((channel) => (
+              <CommandItem key={channel.id} onSelect={() => handleChannelSelect(channel.id)}>
                 <MessageSquare className="mr-2 h-4 w-4" />
-              )}
-              <span>{channel.name}</span>
-              {channel.unreadCount > 0 && (
-                <span className="ml-auto min-w-5 h-5 px-1.5 rounded-full bg-primary text-primary-foreground text-2xs font-medium flex items-center justify-center">
-                  {channel.unreadCount}
-                </span>
-              )}
-            </CommandItem>
-          ))}
-        </CommandGroup>
+                <span>{channel.name}</span>
+                {channel.unreadCount > 0 && (
+                  <span className="ml-auto min-w-5 h-5 px-1.5 rounded-full bg-primary text-primary-foreground text-2xs font-medium flex items-center justify-center">
+                    {channel.unreadCount}
+                  </span>
+                )}
+              </CommandItem>
+            ))}
+          </CommandGroup>
+        )}
       </CommandList>
     </CommandDialog>
   );

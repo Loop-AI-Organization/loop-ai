@@ -1,0 +1,14 @@
+# Snippet for Nginx `location` that proxies to the FastAPI backend (e.g. port 4000).
+# Long @ai triage calls run several LLM round-trips in one HTTP request; defaults
+# like proxy_read_timeout 60s often cut the connection while the app is still working.
+#
+# Merge into your server block or include from sites-enabled, then `nginx -t && systemctl reload nginx`.
+#
+# If errors persist, check `/var/log/nginx/error.log` for:
+#   upstream timed out (while reading response header from upstream)
+# which confirms the proxy gave up before the backend responded.
+
+proxy_connect_timeout 75s;
+proxy_send_timeout 300s;
+proxy_read_timeout 300s;
+send_timeout 300s;

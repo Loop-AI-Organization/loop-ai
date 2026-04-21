@@ -4,7 +4,8 @@ services:
   api:
     build: .
     env_file:
-      - .env
+      # Repo root `.env` (same layout as docker-compose.yml); avoids missing OPENROUTER_* when only ~/loop-ai/.env exists
+      - ../.env
     environment:
       # Use the internal Redis service instead of localhost
       - REDIS_URL=redis://redis:6379
@@ -18,7 +19,7 @@ services:
     build: .
     command: python worker.py
     env_file:
-      - .env
+      - ../.env
     environment:
       - REDIS_URL=redis://redis:6379
     depends_on:

@@ -37,6 +37,7 @@ def create_app() -> FastAPI:
     origins = [
         "http://localhost:5173",
         "http://127.0.0.1:5173",
+        "https://frontend-gamma-ten-16.vercel.app",
     ]
     if settings.cors_origin:
         origins.extend(s.strip() for s in settings.cors_origin.split(",") if s.strip())

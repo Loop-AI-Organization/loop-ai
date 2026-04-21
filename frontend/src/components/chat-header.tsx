@@ -45,8 +45,8 @@ export function ChatHeader() {
         <div className="relative hidden sm:block">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <Input
-            placeholder="Search..."
-            className="w-48 pl-8 h-8 text-sm bg-muted/50 border-transparent focus:border-border"
+            placeholder="Search channels or type a command..."
+            className="w-64 pl-8 h-8 text-sm bg-muted/50 border-transparent focus:border-border"
             onClick={() => setCommandPaletteOpen(true)}
             readOnly
           />

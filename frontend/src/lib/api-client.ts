@@ -112,7 +112,9 @@ export async function streamAssistant(
   _userMessage: string,
   callbacks: StreamCallbacks
 ): Promise<void> {
-  const wsUrl = (import.meta.env.VITE_BACKEND_WS_URL as string | undefined) || 'ws://localhost:4000/ws';
+  const wsUrl =
+    (import.meta.env.VITE_BACKEND_WS_URL as string | undefined) ||
+    'wss://api.loopai-project.me/ws';
   const messagesPayload = buildThreadMessages(threadId);
 
   let fullContent = '';
