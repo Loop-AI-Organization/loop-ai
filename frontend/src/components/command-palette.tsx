@@ -2,6 +2,8 @@ import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Search, Hash, MessageSquare, ArrowRight } from 'lucide-react';
 import { useAppStore } from '@/store/app-store';
+import { launchDirectMessage, listDmCandidates } from '@/lib/dm';
+import type { WorkspaceMember } from '@/types';
 import {
   CommandDialog,
   CommandEmpty,
@@ -22,6 +24,10 @@ export function CommandPalette() {
   const navigate = useNavigate();
 
   const [search, setSearch] = useState('');
+  const [dmMembers, setDmMembers] = useState<WorkspaceMember[]>([]);
+  const [loadingMembers, setLoadingMembers] = useState(false);
+  const [membersError, setMembersError] = useState<string | null>(null);
+  const [startingDmFor, setStartingDmFor] = useState<string | null>(null);
 
   // Reset search when opening
   useEffect(() => {
@@ -29,6 +35,30 @@ export function CommandPalette() {
       setSearch('');
     }
   }, [isCommandPaletteOpen]);
+
+  useEffect(() => {
+    if (!isCommandPaletteOpen || !currentWorkspaceId) return;
+    let cancelled = false;
+    setLoadingMembers(true);
+    setMembersError(null);
+    listDmCandidates(currentWorkspaceId)
+      .then((members) => {
+        if (!cancelled) setDmMembers(members);
+      })
+      .catch((e) => {
+        if (!cancelled) {
+          setDmMembers([]);
+          setMembersError(e instanceof Error ? e.message : 'Failed to load members');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingMembers(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isCommandPaletteOpen, currentWorkspaceId]);
 
   const workspaceChannels = useMemo(() => 
     channels.filter(c => c.workspaceId === currentWorkspaceId),
@@ -42,10 +72,34 @@ export function CommandPalette() {
     );
   }, [workspaceChannels, search]);
 
+  const filteredMembers = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    if (!query) return dmMembers;
+    return dmMembers.filter((member) => {
+      const haystack = `${member.displayName ?? ''} ${member.email ?? ''}`.toLowerCase();
+      return haystack.includes(query);
+    });
+  }, [dmMembers, search]);
+
   const handleChannelSelect = (channelId: string) => {
     setCommandPaletteOpen(false);
     if (currentWorkspaceId) {
       navigate(`/app/${currentWorkspaceId}/${channelId}`);
+    }
+  };
+
+  const handleStartDm = async (otherUserId: string) => {
+    if (!currentWorkspaceId || startingDmFor) return;
+    setStartingDmFor(otherUserId);
+    setMembersError(null);
+    try {
+      const channel = await launchDirectMessage(currentWorkspaceId, otherUserId);
+      setCommandPaletteOpen(false);
+      navigate(`/app/${currentWorkspaceId}/${channel.id}`);
+    } catch (e) {
+      setMembersError(e instanceof Error ? e.message : 'Failed to start direct message');
+    } finally {
+      setStartingDmFor(null);
     }
   };
 
@@ -73,6 +127,42 @@ export function CommandPalette() {
             <span>Focus Composer</span>
             <kbd className="ml-auto kbd">⌘/</kbd>
           </CommandItem>
+        </CommandGroup>
+
+        <CommandSeparator />
+
+        {/* Direct messages */}
+        <CommandGroup heading="Start Direct Message">
+          {loadingMembers ? (
+            <CommandItem disabled>
+              <span>Loading members...</span>
+            </CommandItem>
+          ) : filteredMembers.length > 0 ? (
+            filteredMembers.map((member) => (
+              <CommandItem
+                key={member.id}
+                onSelect={() => {
+                  void handleStartDm(member.userId);
+                }}
+                disabled={startingDmFor !== null}
+              >
+                <MessageSquare className="mr-2 h-4 w-4" />
+                <span>{member.displayName ?? member.email ?? 'User'}</span>
+                {startingDmFor === member.userId && (
+                  <span className="ml-auto text-xs text-muted-foreground">Opening...</span>
+                )}
+              </CommandItem>
+            ))
+          ) : (
+            <CommandItem disabled>
+              <span>No members found.</span>
+            </CommandItem>
+          )}
+          {membersError && (
+            <CommandItem disabled>
+              <span>{membersError}</span>
+            </CommandItem>
+          )}
         </CommandGroup>
 
         <CommandSeparator />

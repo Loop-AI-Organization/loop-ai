@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Hash, Pin, Plus, MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
+import { Hash, Pin, Plus, MoreHorizontal, Pencil, Trash2, MessageSquare } from 'lucide-react';
 import { useAppStore } from '@/store/app-store';
 import { cn } from '@/lib/utils';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -23,17 +23,58 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { createChannel, updateChannel, deleteChannel } from '@/lib/supabase-data';
+import { launchDirectMessage, listDmCandidates } from '@/lib/dm';
+import type { WorkspaceMember } from '@/types';
 
 export function ChannelList() {
   const navigate = useNavigate();
   const [newChannelOpen, setNewChannelOpen] = useState(false);
   const [newChannelName, setNewChannelName] = useState('');
   const [creating, setCreating] = useState(false);
+  const [newDmOpen, setNewDmOpen] = useState(false);
+  const [dmSearch, setDmSearch] = useState('');
+  const [dmMembers, setDmMembers] = useState<WorkspaceMember[]>([]);
+  const [dmLoading, setDmLoading] = useState(false);
+  const [dmError, setDmError] = useState<string | null>(null);
+  const [creatingDmFor, setCreatingDmFor] = useState<string | null>(null);
 
   const { channels, currentWorkspaceId, currentChannelId } = useAppStore();
 
   const workspaceChannels = channels.filter((c) => c.workspaceId === currentWorkspaceId);
   const projectChannels = workspaceChannels.filter((c) => c.type === 'project');
+  const dmChannels = workspaceChannels.filter((c) => c.type === 'dm');
+  const filteredDmMembers = useMemo(() => {
+    const query = dmSearch.trim().toLowerCase();
+    if (!query) return dmMembers;
+    return dmMembers.filter((member) => {
+      const haystack = `${member.displayName ?? ''} ${member.email ?? ''}`.toLowerCase();
+      return haystack.includes(query);
+    });
+  }, [dmMembers, dmSearch]);
+
+  useEffect(() => {
+    if (!newDmOpen || !currentWorkspaceId) return;
+    let cancelled = false;
+    setDmLoading(true);
+    setDmError(null);
+    listDmCandidates(currentWorkspaceId)
+      .then((members) => {
+        if (!cancelled) setDmMembers(members);
+      })
+      .catch((e) => {
+        if (!cancelled) {
+          setDmMembers([]);
+          setDmError(e instanceof Error ? e.message : 'Failed to load members');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setDmLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [newDmOpen, currentWorkspaceId]);
 
   const handleCreateChannel = async () => {
     if (!currentWorkspaceId || !newChannelName.trim()) return;
@@ -57,6 +98,22 @@ export function ChannelList() {
   const handleSelectChannel = (channelId: string) => {
     if (channelId === currentChannelId || !currentWorkspaceId) return;
     navigate(`/app/${currentWorkspaceId}/${channelId}`);
+  };
+
+  const handleStartDm = async (otherUserId: string) => {
+    if (!currentWorkspaceId || creatingDmFor) return;
+    setCreatingDmFor(otherUserId);
+    setDmError(null);
+    try {
+      const channel = await launchDirectMessage(currentWorkspaceId, otherUserId);
+      setNewDmOpen(false);
+      setDmSearch('');
+      navigate(`/app/${currentWorkspaceId}/${channel.id}`);
+    } catch (e) {
+      setDmError(e instanceof Error ? e.message : 'Failed to start direct message');
+    } finally {
+      setCreatingDmFor(null);
+    }
   };
 
   return (
@@ -84,6 +141,36 @@ export function ChannelList() {
             >
               <Plus className="w-3.5 h-3.5" />
               Add channel
+            </Button>
+          </div>
+        </div>
+
+        {/* Direct Messages */}
+        <div>
+          <div className="flex items-center gap-2 px-4 py-1.5 text-2xs font-medium text-text-tertiary uppercase tracking-wider">
+            Direct Messages
+          </div>
+          <ChannelGroup
+            channels={dmChannels}
+            currentChannelId={currentChannelId}
+            currentWorkspaceId={currentWorkspaceId}
+            onSelect={handleSelectChannel}
+            icon={MessageSquare}
+          />
+          <div className="px-3 py-1">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="w-full justify-start gap-2 text-muted-foreground hover:text-sidebar-foreground"
+              onClick={() => {
+                setDmSearch('');
+                setDmError(null);
+                setNewDmOpen(true);
+              }}
+              disabled={!currentWorkspaceId}
+            >
+              <Plus className="w-3.5 h-3.5" />
+              New DM
             </Button>
           </div>
         </div>
@@ -125,6 +212,69 @@ export function ChannelList() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* New DM dialog */}
+      <Dialog
+        open={newDmOpen}
+        onOpenChange={(open) => {
+          setNewDmOpen(open);
+          if (!open) {
+            setDmSearch('');
+            setDmError(null);
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Start direct message</DialogTitle>
+            <DialogDescription>Select a workspace member to chat with.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-2">
+              <Label htmlFor="dm-member-search">Find member</Label>
+              <Input
+                id="dm-member-search"
+                value={dmSearch}
+                onChange={(e) => setDmSearch(e.target.value)}
+                placeholder="Search by name or email"
+              />
+            </div>
+            <div className="max-h-64 overflow-y-auto rounded-md border border-border">
+              {dmLoading ? (
+                <p className="px-3 py-3 text-sm text-muted-foreground">Loading members…</p>
+              ) : filteredDmMembers.length === 0 ? (
+                <p className="px-3 py-3 text-sm text-muted-foreground">No members found.</p>
+              ) : (
+                <div className="divide-y divide-border">
+                  {filteredDmMembers.map((member) => (
+                    <button
+                      key={member.id}
+                      type="button"
+                      className="w-full px-3 py-2.5 text-left hover:bg-muted/40 transition-colors disabled:opacity-60"
+                      onClick={() => void handleStartDm(member.userId)}
+                      disabled={creatingDmFor !== null}
+                    >
+                      <p className="text-sm font-medium truncate">
+                        {member.displayName ?? member.email ?? 'User'}
+                      </p>
+                      {member.displayName && member.email ? (
+                        <p className="text-xs text-muted-foreground truncate">{member.email}</p>
+                      ) : null}
+                      {creatingDmFor === member.userId ? (
+                        <p className="text-xs text-muted-foreground mt-1">Opening…</p>
+                      ) : null}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            {dmError && <p className="text-sm text-destructive">{dmError}</p>}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setNewDmOpen(false)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </ScrollArea>
   );
 }
@@ -132,7 +282,7 @@ export function ChannelList() {
 // ── ChannelGroup ─────────────────────────────────────────────────────────────
 
 interface ChannelGroupProps {
-  channels: Array<{ id: string; name: string; unreadCount: number; avatar?: string }>;
+  channels: Array<{ id: string; name: string; unreadCount: number; avatar?: string; type?: 'project' | 'dm' }>;
   currentChannelId: string | null;
   currentWorkspaceId: string | null;
   onSelect: (id: string) => void;
@@ -239,7 +389,12 @@ function ChannelGroup({
   return (
     <>
       <div className="space-y-0.5">
-        {channels.map((channel) => (
+        {channels.map((channel) => {
+          const isDm = channel.type === 'dm';
+          const canRename = isOwner && !showAvatar && !isDm;
+          const canDelete = !showAvatar && (isOwner || isDm);
+
+          return (
           <div key={channel.id} className="group relative flex items-center">
             <button
               onClick={() => onSelect(channel.id)}
@@ -266,7 +421,7 @@ function ChannelGroup({
               )}
             </button>
 
-            {isOwner && !showAvatar && (
+            {canDelete && (
               <div className="absolute right-1">
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
@@ -280,20 +435,24 @@ function ChannelGroup({
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent side="right" align="start" className="w-40">
-                    <DropdownMenuItem
-                      onSelect={(e) => {
-                        e.preventDefault();
-                        setRenameId(channel.id);
-                        setRenameName(channel.name);
-                        setRenameError(null);
-                        setRenameOpen(true);
-                      }}
-                      className="gap-2"
-                    >
-                      <Pencil className="w-3.5 h-3.5" />
-                      Rename
-                    </DropdownMenuItem>
-                    <DropdownMenuSeparator />
+                    {canRename && (
+                      <>
+                        <DropdownMenuItem
+                          onSelect={(e) => {
+                            e.preventDefault();
+                            setRenameId(channel.id);
+                            setRenameName(channel.name);
+                            setRenameError(null);
+                            setRenameOpen(true);
+                          }}
+                          className="gap-2"
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                          Rename
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                      </>
+                    )}
                     <DropdownMenuItem
                       onSelect={(e) => {
                         e.preventDefault();
@@ -311,7 +470,8 @@ function ChannelGroup({
               </div>
             )}
           </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* Rename Channel Dialog */}

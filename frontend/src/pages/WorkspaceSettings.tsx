@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAppStore } from '@/store/app-store';
-import { ArrowLeft, Trash2, Globe, Lock } from 'lucide-react';
+import { ArrowLeft, Trash2, Globe, Lock, MessageSquare } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
@@ -16,6 +16,7 @@ import {
   rotateWorkspaceShareCode,
   removeWorkspaceMember,
 } from '@/lib/supabase-data';
+import { launchDirectMessage } from '@/lib/dm';
 import type { WorkspaceMember } from '@/types';
 
 export default function WorkspaceSettings() {
@@ -31,6 +32,8 @@ export default function WorkspaceSettings() {
   const [rotating, setRotating] = useState(false);
   const [copied, setCopied] = useState(false);
   const [removeError, setRemoveError] = useState<string | null>(null);
+  const [dmError, setDmError] = useState<string | null>(null);
+  const [startingDmUserId, setStartingDmUserId] = useState<string | null>(null);
 
   const { workspaces, user, currentChannelId, channels, setWorkspaces } = useAppStore();
   const workspace = workspaces.find((w) => w.id === workspaceId);
@@ -158,6 +161,22 @@ export default function WorkspaceSettings() {
     }
   };
 
+  const handleStartDm = async (otherUserId: string) => {
+    if (!workspaceId || !user || !otherUserId || otherUserId === user.id || startingDmUserId) {
+      return;
+    }
+    setDmError(null);
+    setStartingDmUserId(otherUserId);
+    try {
+      const channel = await launchDirectMessage(workspaceId, otherUserId);
+      navigate(`/app/${workspaceId}/${channel.id}`);
+    } catch (e) {
+      setDmError(e instanceof Error ? e.message : 'Failed to start direct message');
+    } finally {
+      setStartingDmUserId(null);
+    }
+  };
+
   const handleSaveGeneral = async () => {
     if (!workspaceId || !workspace) return;
     setSaving(true);
@@ -261,6 +280,18 @@ export default function WorkspaceSettings() {
                       <span className="text-xs text-muted-foreground bg-muted px-2 py-1 rounded capitalize">
                         {m.role}
                       </span>
+                      {m.userId !== user?.id && (
+                        <Button
+                          variant="outline"
+                          size="xs"
+                          className="text-xs gap-1"
+                          onClick={() => void handleStartDm(m.userId)}
+                          disabled={startingDmUserId === m.userId}
+                        >
+                          <MessageSquare className="w-3 h-3" />
+                          {startingDmUserId === m.userId ? 'Opening…' : 'Message'}
+                        </Button>
+                      )}
                       {isOwner && m.role !== 'owner' && (
                         <Button
                           variant="outline"
@@ -277,6 +308,7 @@ export default function WorkspaceSettings() {
               </div>
             )}
             {removeError && <p className="text-sm text-destructive">{removeError}</p>}
+            {dmError && <p className="text-sm text-destructive">{dmError}</p>}
           </div>
         </section>
 
