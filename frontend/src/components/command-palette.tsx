@@ -1,7 +1,9 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, Hash, MessageSquare } from 'lucide-react';
+import { Search, Hash, MessageSquare, ArrowRight } from 'lucide-react';
 import { useAppStore } from '@/store/app-store';
+import { launchDirectMessage, listDmCandidates } from '@/lib/dm';
+import type { WorkspaceMember } from '@/types';
 import {
   CommandDialog,
   CommandEmpty,
@@ -17,24 +19,50 @@ export function CommandPalette() {
     isCommandPaletteOpen,
     setCommandPaletteOpen,
     channels,
-    threads,
     currentWorkspaceId,
-    setCurrentChannel,
-    setCurrentThread,
   } = useAppStore();
   const navigate = useNavigate();
 
   const [search, setSearch] = useState('');
+  const [dmMembers, setDmMembers] = useState<WorkspaceMember[]>([]);
+  const [loadingMembers, setLoadingMembers] = useState(false);
+  const [membersError, setMembersError] = useState<string | null>(null);
+  const [startingDmFor, setStartingDmFor] = useState<string | null>(null);
 
-  // Reset search when opening
   useEffect(() => {
     if (isCommandPaletteOpen) {
       setSearch('');
     }
   }, [isCommandPaletteOpen]);
 
-  const workspaceChannels = useMemo(() => 
-    channels.filter(c => c.workspaceId === currentWorkspaceId),
+  useEffect(() => {
+    if (!isCommandPaletteOpen || !currentWorkspaceId) return;
+
+    let cancelled = false;
+    setLoadingMembers(true);
+    setMembersError(null);
+
+    listDmCandidates(currentWorkspaceId)
+      .then((members) => {
+        if (!cancelled) setDmMembers(members);
+      })
+      .catch((e) => {
+        if (!cancelled) {
+          setDmMembers([]);
+          setMembersError(e instanceof Error ? e.message : 'Failed to load members');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingMembers(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isCommandPaletteOpen, currentWorkspaceId]);
+
+  const workspaceChannels = useMemo(
+    () => channels.filter((c) => c.workspaceId === currentWorkspaceId),
     [channels, currentWorkspaceId]
   );
 
@@ -56,61 +84,106 @@ export function CommandPalette() {
     });
   }, [workspaceChannels, normalizedSearch]);
 
-  const workspaceChannelIds = useMemo(
-    () => new Set(workspaceChannels.map((channel) => channel.id)),
-    [workspaceChannels]
-  );
-
-  const filteredThreads = useMemo(() => {
-    const workspaceThreads = threads.filter((thread) => workspaceChannelIds.has(thread.channelId));
-    if (!normalizedSearch) return workspaceThreads.slice(0, 10);
-    return workspaceThreads.filter((thread) =>
-      thread.title.toLowerCase().includes(normalizedSearch)
-    );
-  }, [threads, workspaceChannelIds, normalizedSearch]);
+  const filteredMembers = useMemo(() => {
+    if (!normalizedSearch) return dmMembers;
+    return dmMembers.filter((member) => {
+      const haystack = `${member.displayName ?? ''} ${member.email ?? ''}`.toLowerCase();
+      return haystack.includes(normalizedSearch);
+    });
+  }, [dmMembers, normalizedSearch]);
 
   const handleChannelSelect = (channelId: string) => {
-    setCurrentChannel(channelId);
     setCommandPaletteOpen(false);
     if (currentWorkspaceId) {
       navigate(`/app/${currentWorkspaceId}/${channelId}`);
     }
   };
 
-  const handleThreadSelect = (thread: { id: string; channelId: string }) => {
-    setCurrentChannel(thread.channelId);
-    setCurrentThread(thread.id);
-    setCommandPaletteOpen(false);
-    if (currentWorkspaceId) {
-      navigate(`/app/${currentWorkspaceId}/${thread.channelId}`);
+  const handleStartDm = async (otherUserId: string) => {
+    if (!currentWorkspaceId || startingDmFor) return;
+    setStartingDmFor(otherUserId);
+    setMembersError(null);
+
+    try {
+      const channel = await launchDirectMessage(currentWorkspaceId, otherUserId);
+      setCommandPaletteOpen(false);
+      navigate(`/app/${currentWorkspaceId}/${channel.id}`);
+    } catch (e) {
+      setMembersError(e instanceof Error ? e.message : 'Failed to start direct message');
+    } finally {
+      setStartingDmFor(null);
     }
   };
 
   const hasProjectChannels = filteredProjectChannels.length > 0;
   const hasDmChannels = filteredDmChannels.length > 0;
-  const hasThreads = filteredThreads.length > 0;
 
   return (
-    <CommandDialog 
-      open={isCommandPaletteOpen} 
-      onOpenChange={setCommandPaletteOpen}
-    >
-      <CommandInput 
-        placeholder="Search channels, DMs, or threads..." 
+    <CommandDialog open={isCommandPaletteOpen} onOpenChange={setCommandPaletteOpen}>
+      <CommandInput
+        placeholder="Search channels, DMs, or commands..."
         value={search}
         onValueChange={setSearch}
       />
       <CommandList>
         <CommandEmpty>No results found.</CommandEmpty>
 
-        {/* Project channels */}
+        <CommandGroup heading="Quick Actions">
+          <CommandItem
+            onSelect={() => {
+              const composer = document.querySelector('[data-composer-input]') as HTMLTextAreaElement;
+              composer?.focus();
+              setCommandPaletteOpen(false);
+            }}
+          >
+            <ArrowRight className="mr-2 h-4 w-4" />
+            <span>Focus Composer</span>
+            <kbd className="ml-auto kbd">⌘/</kbd>
+          </CommandItem>
+        </CommandGroup>
+
+        <CommandSeparator />
+
+        <CommandGroup heading="Start Direct Message">
+          {loadingMembers ? (
+            <CommandItem disabled>
+              <span>Loading members...</span>
+            </CommandItem>
+          ) : filteredMembers.length > 0 ? (
+            filteredMembers.map((member) => (
+              <CommandItem
+                key={member.id}
+                onSelect={() => {
+                  void handleStartDm(member.userId);
+                }}
+                disabled={startingDmFor !== null}
+              >
+                <MessageSquare className="mr-2 h-4 w-4" />
+                <span>{member.displayName ?? member.email ?? 'User'}</span>
+                {startingDmFor === member.userId && (
+                  <span className="ml-auto text-xs text-muted-foreground">Opening...</span>
+                )}
+              </CommandItem>
+            ))
+          ) : (
+            <CommandItem disabled>
+              <span>No members found.</span>
+            </CommandItem>
+          )}
+
+          {membersError && (
+            <CommandItem disabled>
+              <span>{membersError}</span>
+            </CommandItem>
+          )}
+        </CommandGroup>
+
+        {(hasProjectChannels || hasDmChannels) && <CommandSeparator />}
+
         {hasProjectChannels && (
           <CommandGroup heading="Channels">
             {filteredProjectChannels.map((channel) => (
-              <CommandItem 
-                key={channel.id}
-                onSelect={() => handleChannelSelect(channel.id)}
-              >
+              <CommandItem key={channel.id} onSelect={() => handleChannelSelect(channel.id)}>
                 <Hash className="mr-2 h-4 w-4" />
                 <span>#{' '}{channel.name}</span>
                 {channel.unreadCount > 0 && (
@@ -123,16 +196,12 @@ export function CommandPalette() {
           </CommandGroup>
         )}
 
-        {hasProjectChannels && (hasDmChannels || hasThreads) && <CommandSeparator />}
+        {hasProjectChannels && hasDmChannels && <CommandSeparator />}
 
-        {/* Direct messages */}
         {hasDmChannels && (
           <CommandGroup heading="Direct Messages">
             {filteredDmChannels.map((channel) => (
-              <CommandItem 
-                key={channel.id}
-                onSelect={() => handleChannelSelect(channel.id)}
-              >
+              <CommandItem key={channel.id} onSelect={() => handleChannelSelect(channel.id)}>
                 <MessageSquare className="mr-2 h-4 w-4" />
                 <span>{channel.name}</span>
                 {channel.unreadCount > 0 && (
@@ -140,26 +209,6 @@ export function CommandPalette() {
                     {channel.unreadCount}
                   </span>
                 )}
-              </CommandItem>
-            ))}
-          </CommandGroup>
-        )}
-
-        {hasDmChannels && hasThreads && <CommandSeparator />}
-
-        {/* Threads */}
-        {hasThreads && (
-          <CommandGroup heading="Threads">
-            {filteredThreads.map((thread) => (
-              <CommandItem 
-                key={thread.id}
-                onSelect={() => handleThreadSelect(thread)}
-              >
-                <Search className="mr-2 h-4 w-4 text-muted-foreground" />
-                <span className="truncate">{thread.title}</span>
-                <span className="ml-auto text-xs text-muted-foreground">
-                  {thread.messageCount} messages
-                </span>
               </CommandItem>
             ))}
           </CommandGroup>

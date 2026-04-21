@@ -7,10 +7,8 @@ export function ChatHeader() {
   const {
     workspaces,
     channels,
-    threads,
     currentWorkspaceId,
     currentChannelId,
-    currentThreadId,
     isInspectorOpen,
     toggleInspector,
     toggleSidebar,
@@ -19,7 +17,6 @@ export function ChatHeader() {
 
   const currentWorkspace = workspaces.find((w) => w.id === currentWorkspaceId);
   const currentChannel = channels.find((c) => c.id === currentChannelId);
-  const currentThread = threads.find((t) => t.id === currentThreadId);
 
   return (
     <header className="h-14 border-b border-border flex items-center justify-between px-4 bg-card flex-shrink-0">
@@ -39,14 +36,6 @@ export function ChatHeader() {
           <span className="text-muted-foreground">{currentWorkspace?.name}</span>
           <ChevronRight className="w-3.5 h-3.5 text-muted-foreground" />
           <span className="text-muted-foreground">{currentChannel?.name}</span>
-          {currentThread && (
-            <>
-              <ChevronRight className="w-3.5 h-3.5 text-muted-foreground" />
-              <span className="font-medium text-foreground truncate max-w-48">
-                {currentThread.title}
-              </span>
-            </>
-          )}
         </nav>
       </div>
 
@@ -56,7 +45,7 @@ export function ChatHeader() {
         <div className="relative hidden sm:block">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <Input
-            placeholder="Search channels, DMs, or threads..."
+            placeholder="Search channels or type a command..."
             className="w-64 pl-8 h-8 text-sm bg-muted/50 border-transparent focus:border-border"
             onClick={() => setCommandPaletteOpen(true)}
             readOnly

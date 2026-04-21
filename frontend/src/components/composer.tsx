@@ -3,13 +3,9 @@ import { Send, Paperclip, Bot, Zap, Navigation } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '@/store/app-store';
 import {
-  createThread as createThreadInSupabase,
   insertMessage as insertMessageInSupabase,
   uploadFile,
   triageAndRespond,
-  fetchChannels,
-  fetchThreads,
-  fetchMessages,
 } from '@/lib/supabase-data';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -33,18 +29,11 @@ export function Composer() {
   } | null>(null);
 
   const {
-    currentThreadId,
     currentWorkspaceId,
     currentChannelId,
     orchestratorStatus,
     addMessage,
     setOrchestratorStatus,
-    addThread,
-    setCurrentWorkspace,
-    setCurrentChannel,
-    setChannels,
-    setThreads,
-    setMessages,
   } = useAppStore();
 
   // Auto-resize textarea
@@ -59,33 +48,16 @@ export function Composer() {
     if (!value.trim() || orchestratorStatus !== 'ready') return;
     const content = value.trim();
     const mentionsAi = hasAiMention(content);
-    let threadId = currentThreadId;
-
-    // Create thread in Supabase if none exists
-    if (!threadId && currentWorkspaceId && currentChannelId) {
-      try {
-        const newThread = await createThreadInSupabase(
-          currentWorkspaceId,
-          currentChannelId,
-          content.slice(0, 50) || 'Untitled thread'
-        );
-        addThread(newThread);
-        threadId = newThread.id;
-      } catch {
-        return;
-      }
-    }
-
-    if (!threadId || !currentChannelId) return;
+    if (!currentChannelId) return;
 
     // Persist user message to Supabase and add to store
     try {
-      const userMessage = await insertMessageInSupabase(threadId, 'user', content);
+      const userMessage = await insertMessageInSupabase(currentChannelId, 'user', content);
       addMessage(userMessage);
     } catch {
       addMessage({
         id: `msg-${Date.now()}`,
-        threadId,
+        threadId: `pending-${currentChannelId}`,
         role: 'user',
         content,
         createdAt: new Date(),
@@ -107,7 +79,6 @@ export function Composer() {
     const threadMessages = stateMessages
       .filter(
         (m) =>
-          m.threadId === threadId &&
           m.content.trim().length > 0 &&
           (m.role === 'user' || m.role === 'assistant')
       )
@@ -115,34 +86,18 @@ export function Composer() {
       .map((m) => ({ role: m.role, content: m.content }));
 
     try {
-      const result = await triageAndRespond(currentChannelId, threadId, threadMessages);
+      const result = await triageAndRespond(currentChannelId, threadMessages);
 
       if (result.navigation) {
-        // AI detected a navigation request — navigate to the target channel
+        // AI detected a navigation request — just navigate; WorkspaceChannel handles data loading
         const { channelId, workspaceId, channelName, workspaceName } = result.navigation;
         setNavigationBanner({ channelId, workspaceId, channelName, workspaceName });
-        // Load the target workspace/channel data then navigate
-        try {
-          const channels = await fetchChannels(workspaceId);
-          setChannels(channels);
-          const threads = await fetchThreads(channelId);
-          setThreads(threads);
-          const latest = threads.sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime())[0];
-          const msgs = latest ? await fetchMessages(latest.id) : [];
-          setMessages(msgs);
-          setCurrentWorkspace(workspaceId);
-          setCurrentChannel(channelId);
-        } catch {
-          // Navigation data load failed — still navigate, data will load via useAppData
-          setCurrentWorkspace(workspaceId);
-          setCurrentChannel(channelId);
-        }
         navigate(`/app/${workspaceId}/${channelId}`);
         setTimeout(() => setNavigationBanner(null), 3000);
       } else if (result.shouldRespond && result.content) {
         const assistantMessage: Message = {
           id: result.messageId || `msg-ai-${Date.now()}`,
-          threadId,
+          threadId: `pending-${currentChannelId}`,
           role: 'assistant',
           content: result.content,
           createdAt: new Date(),
@@ -154,7 +109,7 @@ export function Composer() {
       const message = error instanceof Error ? error.message : 'AI response failed';
       addMessage({
         id: `msg-err-${Date.now()}`,
-        threadId,
+        threadId: `pending-${currentChannelId}`,
         role: 'assistant',
         content: `[Assistant Error] ${message}`,
         createdAt: new Date(),
@@ -165,38 +120,20 @@ export function Composer() {
   };
 
   const handleAttachFile = () => {
-    if (!currentWorkspaceId) return;
+    if (!currentChannelId || !currentWorkspaceId) return;
     fileInputRef.current?.click();
   };
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = '';
-    if (!file || !currentWorkspaceId) return;
-
-    let threadId = currentThreadId;
-
-    if (!threadId && currentChannelId) {
-      try {
-        const newThread = await createThreadInSupabase(
-          currentWorkspaceId,
-          currentChannelId,
-          file.name.slice(0, 50)
-        );
-        addThread(newThread);
-        threadId = newThread.id;
-      } catch {
-        return;
-      }
-    }
-
-    if (!threadId) return;
+    if (!file || !currentChannelId || !currentWorkspaceId) return;
 
     setUploading(true);
     try {
-      const uploaded = await uploadFile(currentWorkspaceId, currentChannelId ?? null, file);
+      const uploaded = await uploadFile(currentWorkspaceId, currentChannelId, file);
       const content = `:::file{id="${uploaded.id}"}`;
-      const msg = await insertMessageInSupabase(threadId, 'user', content);
+      const msg = await insertMessageInSupabase(currentChannelId, 'user', content);
       addMessage({ ...msg, files: [uploaded] });
     } catch (err) {
       console.error('Upload failed:', err);
@@ -273,11 +210,7 @@ export function Composer() {
             size="icon"
             className="h-8 w-8"
             title="Attach file"
-            disabled={
-              !currentWorkspaceId ||
-              uploading ||
-              (!currentThreadId && !currentChannelId)
-            }
+            disabled={!currentChannelId || !currentWorkspaceId || uploading}
             onClick={handleAttachFile}
           >
             <Paperclip className="w-4 h-4 text-muted-foreground" />

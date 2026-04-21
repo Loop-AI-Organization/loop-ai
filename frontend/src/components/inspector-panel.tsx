@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { X, FileText, Clock, Settings2, Brain, Bookmark, File } from 'lucide-react';
 import { useAppStore } from '@/store/app-store';
 import { fetchWorkspaceFiles } from '@/lib/supabase-data';
-import type { FileRecord } from '@/types';
+import type { Action, FileRecord } from '@/types';
 import { FileCard } from '@/components/file-card';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -17,7 +17,7 @@ export function InspectorPanel() {
     isInspectorOpen, 
     toggleInspector, 
     actions, 
-    currentThreadId,
+    currentChannelId,
     currentWorkspaceId,
     contextItems,
     threadSettings,
@@ -25,7 +25,7 @@ export function InspectorPanel() {
   } = useAppStore();
   const [workspaceFiles, setWorkspaceFiles] = useState<FileRecord[]>([]);
 
-  const threadActions = actions.filter(a => a.threadId === currentThreadId);
+  const threadActions = currentChannelId ? actions : [];
 
   useEffect(() => {
     if (!currentWorkspaceId) {
@@ -89,7 +89,7 @@ export function InspectorPanel() {
             <ScrollArea className="h-full">
               <div className="p-4 space-y-3">
                 <p className="text-xs text-muted-foreground">
-                  Project memory and context loaded for this thread.
+                  Project memory and context loaded for this channel.
                 </p>
                 {contextItems.map((item) => (
                   <ContextCard key={item.id} item={item} />
@@ -147,7 +147,7 @@ export function InspectorPanel() {
             <ScrollArea className="h-full">
               <div className="p-4 space-y-6">
                 <p className="text-xs text-muted-foreground">
-                  Configure thread-specific settings.
+                  Configure channel-specific settings.
                 </p>
 
                 <div className="space-y-4">
@@ -225,21 +225,14 @@ function ContextCard({ item }: ContextCardProps) {
 }
 
 interface ActionTimelineItemProps {
-  action: {
-    id: string;
-    label: string;
-    status: 'pending' | 'running' | 'completed' | 'failed';
-    startedAt?: Date;
-    completedAt?: Date;
-    output?: string;
-  };
+  action: Action;
 }
 
 function ActionTimelineItem({ action }: ActionTimelineItemProps) {
   return (
     <div className="flex items-start gap-3 p-2 rounded-md hover:bg-muted/50">
       <div className="mt-0.5">
-        <ActionChip action={action as any} compact />
+        <ActionChip action={action} compact />
       </div>
       <div className="flex-1 min-w-0">
         <p className="text-sm font-medium truncate">{action.label}</p>
