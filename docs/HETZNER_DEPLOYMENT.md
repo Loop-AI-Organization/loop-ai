@@ -91,8 +91,9 @@ PORT=4000
 REDIS_URL=redis://redis:6379
 
 # Frontend URL (no trailing slash)
-CORS_ORIGIN=https://frontend-gamma-ten-16.vercel.app
-SITE_URL=https://frontend-gamma-ten-16.vercel.app
+# Use your exact production Vercel origin(s), comma-separated when needed.
+CORS_ORIGIN=https://loopai-project.vercel.app,https://www.loopai-project.me
+SITE_URL=https://loopai-project.vercel.app
 ```
 
 > **Important:** Do **not** commit this `.env` to git. It should only live on the server.
@@ -191,8 +192,30 @@ In Supabase dashboard:
 - **Verify env and Redis queue from a container**:
 
   ```bash
-  docker compose -f docker-compose.prod.yml exec api printenv | egrep 'REDIS_URL|OPENROUTER_'
+  docker compose -f docker-compose.prod.yml exec api python scripts/verify_runtime_env.py
+  docker compose -f docker-compose.prod.yml exec worker python scripts/verify_runtime_env.py
   docker compose -f docker-compose.prod.yml exec api python scripts/smoke_rq_enqueue.py
+  ```
+
+- **Verify API enqueue path from outside the container**:
+
+  ```bash
+  export API_URL=https://api.loopai-project.me
+  export ACCESS_TOKEN='YOUR_SUPABASE_JWT'
+  curl -i -X POST "$API_URL/api/actions" \
+    -H "Authorization: Bearer $ACCESS_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d '{"thread_id":"__smoke_thread__","label":"__smoke_label__"}'
+  ```
+
+- **Smoke-test triage endpoint end-to-end**:
+
+  ```bash
+  export API_URL=https://api.loopai-project.me
+  export ACCESS_TOKEN='YOUR_SUPABASE_JWT'
+  export CHANNEL_ID='YOUR_CHANNEL_UUID'
+  export TRIAGE_MESSAGE='@ai summarize what we discussed today'
+  python backend/scripts/smoke_triage_request.py
   ```
 
 - **Stop the stack**:

@@ -39,12 +39,19 @@ def create_app() -> FastAPI:
         "http://127.0.0.1:5173",
         "https://frontend-gamma-ten-16.vercel.app",
     ]
+    if settings.site_url:
+        origins.append(settings.site_url.strip())
     if settings.cors_origin:
         origins.extend(s.strip() for s in settings.cors_origin.split(",") if s.strip())
+    origins = list(dict.fromkeys(origins))
     app.add_middleware(
         CORSMiddleware,
         allow_origins=origins,
-        allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
+        allow_origin_regex=(
+            r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$"
+            r"|^https://([a-zA-Z0-9-]+\.)?vercel\.app$"
+            r"|^https://([a-zA-Z0-9-]+\.)?loopai-project\.me$"
+        ),
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],

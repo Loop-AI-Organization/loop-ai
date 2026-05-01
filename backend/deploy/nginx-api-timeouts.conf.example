@@ -3,6 +3,17 @@
 # like proxy_read_timeout 60s often cut the connection while the app is still working.
 #
 # Merge into your server block or include from sites-enabled, then `nginx -t && systemctl reload nginx`.
+# Example:
+#
+#   location / {
+#       proxy_pass http://127.0.0.1:4000;
+#       proxy_http_version 1.1;
+#       proxy_set_header Host $host;
+#       proxy_set_header X-Real-IP $remote_addr;
+#       proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+#       proxy_set_header X-Forwarded-Proto $scheme;
+#       include /opt/loop-ai/backend/deploy/nginx-api-timeouts.conf.example;
+#   }
 #
 # If errors persist, check `/var/log/nginx/error.log` for:
 #   upstream timed out (while reading response header from upstream)

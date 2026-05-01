@@ -53,7 +53,7 @@ In [Supabase Dashboard](https://supabase.com/dashboard) → your project:
    - `SUPABASE_ANON_KEY` = anon key
    - `SUPABASE_SERVICE_ROLE_KEY` = service_role key
    - `OPENROUTER_API_KEY` = your OpenRouter key
-   - **loop-ai-api only:** `CORS_ORIGIN` = your frontend URL (e.g. `https://loop-ai.vercel.app`), `SITE_URL` = same
+   - **loop-ai-api only:** `CORS_ORIGIN` = exact frontend origin(s), comma-separated if needed (e.g. `https://loop-ai.vercel.app,https://www.loopai-project.me`), `SITE_URL` = primary frontend URL
 4. `REDIS_URL` is filled automatically from the Redis instance. Deploy.
 5. Copy the **loop-ai-api** URL (e.g. `https://loop-ai-api.onrender.com`) and use it as `VITE_API_URL` and for `VITE_BACKEND_WS_URL` (with `wss://` and `/ws`). Update the frontend env vars and redeploy the frontend if you had used a placeholder.
 

@@ -716,6 +716,7 @@ async def ws_chat(websocket: WebSocket):
 
 class TriageRequest(BaseModel):
     channel_id: str
+    thread_id: Optional[str] = None
     messages: List[dict]  # [{role, content}]
 
 
@@ -833,11 +834,12 @@ async def respond_to_ai_mention(
         raise HTTPException(status_code=401, detail="Invalid user")
     if body.channel_id != channel_id:
         raise HTTPException(status_code=400, detail="channel_id mismatch")
+    thread_id = body.thread_id or _get_or_create_channel_thread(channel_id)
 
     logger.info(
         "triage start channel_id=%s thread_id=%s uid=%s message_count=%s",
         channel_id,
-        body.thread_id,
+        thread_id,
         uid,
         len(body.messages) if isinstance(body.messages, list) else 0,
     )
@@ -930,7 +932,7 @@ async def respond_to_ai_mention(
                         supabase.table("messages")
                         .insert(
                             {
-                                "thread_id": body.thread_id,
+                                "thread_id": thread_id,
                                 "role": "assistant",
                                 "content": content,
                             }
@@ -953,7 +955,7 @@ async def respond_to_ai_mention(
                         supabase.table("messages")
                         .insert(
                             {
-                                "thread_id": body.thread_id,
+                                "thread_id": thread_id,
                                 "role": "assistant",
                                 "content": content,
                             }
@@ -998,7 +1000,7 @@ async def respond_to_ai_mention(
                 content = f"I created \"{doc_title}\":\n\n{file_marker}"
                 try:
                     result = supabase.table("messages").insert({
-                        "thread_id": body.thread_id,
+                        "thread_id": thread_id,
                         "role": "assistant",
                         "content": content,
                     }).execute()
@@ -1030,7 +1032,6 @@ async def respond_to_ai_mention(
 
     # Save assistant message to Supabase (thread compatibility path)
     try:
-        thread_id = _get_or_create_channel_thread(body.channel_id)
         result = (
             supabase.table("messages")
             .insert({

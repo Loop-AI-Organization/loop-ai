@@ -4,7 +4,7 @@ Verify the API can reach Redis and enqueue an RQ job (same path as POST /api/act
 
 Run inside the backend container from /app (default WORKDIR):
 
-  docker compose exec backend python scripts/smoke_rq_enqueue.py
+  docker compose -f docker-compose.prod.yml exec api python scripts/smoke_rq_enqueue.py
 
 You should see LPUSH / RQ traffic in `redis-cli monitor` while this runs.
 The worker may log a harmless completion for label __smoke_label__ (no DB row required).
