@@ -3,7 +3,17 @@
  * All queries run with the current user's session; RLS enforces per-user access.
  */
 import { getSupabase, getAuthHeaders } from '@/lib/supabase';
-import type { Workspace, Channel, Thread, Message, WorkspaceMember, FileRecord } from '@/types';
+import type {
+  Workspace,
+  Channel,
+  Thread,
+  Message,
+  WorkspaceMember,
+  FileRecord,
+  Task,
+  TaskAssignee,
+  TaskStatus,
+} from '@/types';
 
 const API_URL = import.meta.env.VITE_API_URL ?? 'https://api.loopai-project.me';
 
@@ -718,4 +728,253 @@ export async function triageAndRespond(
       : undefined,
     files: data.files?.map((f: FileRow) => toFileRecord(f)),
   };
+}
+
+// --- Tasks ---
+
+interface TaskRow {
+  id: string;
+  workspace_id: string;
+  channel_id: string;
+  title: string;
+  description: string | null;
+  status: TaskStatus;
+  due_date: string | null;
+  source_message_id: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface TaskAssigneeRow {
+  task_id: string;
+  display_name: string;
+  user_id: string | null;
+  added_by: string | null;
+  added_at: string;
+}
+
+function toTaskAssignee(r: TaskAssigneeRow): TaskAssignee {
+  return {
+    taskId: r.task_id,
+    displayName: r.display_name,
+    userId: r.user_id,
+    addedBy: r.added_by,
+    addedAt: new Date(r.added_at),
+  };
+}
+
+function toTask(r: TaskRow, assignees: TaskAssigneeRow[] = []): Task {
+  return {
+    id: r.id,
+    workspaceId: r.workspace_id,
+    channelId: r.channel_id,
+    title: r.title,
+    description: r.description,
+    status: r.status,
+    dueDate: r.due_date ? new Date(r.due_date) : null,
+    sourceMessageId: r.source_message_id,
+    createdBy: r.created_by,
+    createdAt: new Date(r.created_at),
+    updatedAt: new Date(r.updated_at),
+    assignees: assignees.map(toTaskAssignee),
+  };
+}
+
+export async function fetchChannelTasks(channelId: string): Promise<Task[]> {
+  const supabase = getSupabase();
+  const { data: tasks, error } = await supabase
+    .from('tasks')
+    .select('*')
+    .eq('channel_id', channelId)
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  const rows = (tasks ?? []) as TaskRow[];
+  if (rows.length === 0) return [];
+
+  const { data: assignees, error: aErr } = await supabase
+    .from('task_assignees')
+    .select('*')
+    .in('task_id', rows.map((r) => r.id));
+  if (aErr) throw aErr;
+  const aRows = (assignees ?? []) as TaskAssigneeRow[];
+  const byTask = new Map<string, TaskAssigneeRow[]>();
+  for (const a of aRows) {
+    const list = byTask.get(a.task_id) ?? [];
+    list.push(a);
+    byTask.set(a.task_id, list);
+  }
+  return rows.map((r) => toTask(r, byTask.get(r.id) ?? []));
+}
+
+export async function createTask(input: {
+  workspaceId: string;
+  channelId: string;
+  title: string;
+  description?: string | null;
+  status?: TaskStatus;
+  dueDate?: Date | null;
+  sourceMessageId?: string | null;
+  assignees?: { displayName: string; userId?: string | null }[];
+}): Promise<Task> {
+  const supabase = getSupabase();
+  const { data: row, error } = await supabase
+    .from('tasks')
+    .insert({
+      workspace_id: input.workspaceId,
+      channel_id: input.channelId,
+      title: input.title,
+      description: input.description ?? null,
+      status: input.status ?? 'proposed',
+      due_date: input.dueDate ? input.dueDate.toISOString() : null,
+      source_message_id: input.sourceMessageId ?? null,
+    })
+    .select('*')
+    .single();
+  if (error) throw error;
+  const taskRow = row as TaskRow;
+
+  let assignees: TaskAssigneeRow[] = [];
+  if (input.assignees && input.assignees.length > 0) {
+    const { data: aRows, error: aErr } = await supabase
+      .from('task_assignees')
+      .insert(
+        input.assignees.map((a) => ({
+          task_id: taskRow.id,
+          display_name: a.displayName,
+          user_id: a.userId ?? null,
+        }))
+      )
+      .select('*');
+    if (aErr) throw aErr;
+    assignees = (aRows ?? []) as TaskAssigneeRow[];
+  }
+  return toTask(taskRow, assignees);
+}
+
+export async function updateTaskStatus(taskId: string, status: TaskStatus): Promise<void> {
+  const supabase = getSupabase();
+  const { error } = await supabase.from('tasks').update({ status }).eq('id', taskId);
+  if (error) throw error;
+}
+
+export async function confirmTask(taskId: string): Promise<void> {
+  // Promotes a proposed task to open. Anyone in the workspace may do this.
+  return updateTaskStatus(taskId, 'open');
+}
+
+export async function rejectTask(taskId: string): Promise<void> {
+  const supabase = getSupabase();
+  const { error } = await supabase.from('tasks').delete().eq('id', taskId);
+  if (error) throw error;
+}
+
+export async function addTaskAssignee(
+  taskId: string,
+  displayName: string,
+  userId?: string | null
+): Promise<TaskAssignee> {
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from('task_assignees')
+    .insert({ task_id: taskId, display_name: displayName, user_id: userId ?? null })
+    .select('*')
+    .single();
+  if (error) throw error;
+  return toTaskAssignee(data as TaskAssigneeRow);
+}
+
+export async function removeTaskAssignee(taskId: string, displayName: string): Promise<void> {
+  const supabase = getSupabase();
+  const { error } = await supabase
+    .from('task_assignees')
+    .delete()
+    .eq('task_id', taskId)
+    .eq('display_name', displayName);
+  if (error) throw error;
+}
+
+// --- Task API routes (backed by backend, not direct Supabase) ---
+
+export async function confirmTaskViaApi(taskId: string): Promise<Task> {
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${API_URL}/api/tasks/${taskId}/confirm`, {
+    method: 'POST',
+    headers,
+  });
+  if (!res.ok) throw new Error(`Failed to confirm task (${res.status})`);
+  const body = await res.json();
+  const r = body.task as TaskRow & { task_assignees?: TaskAssigneeRow[] };
+  return toTask(r, r.task_assignees ?? []);
+}
+
+export async function deleteTaskViaApi(taskId: string): Promise<void> {
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${API_URL}/api/tasks/${taskId}`, {
+    method: 'DELETE',
+    headers,
+  });
+  if (!res.ok) throw new Error(`Failed to delete task (${res.status})`);
+}
+
+export async function updateTaskViaApi(
+  taskId: string,
+  updates: {
+    status?: TaskStatus;
+    title?: string;
+    description?: string;
+    dueDate?: Date | null;
+    assignees?: string[];
+  }
+): Promise<Task> {
+  const headers = await getAuthHeaders();
+  const payload: Record<string, unknown> = {};
+  if (updates.status !== undefined) payload.status = updates.status;
+  if (updates.title !== undefined) payload.title = updates.title;
+  if (updates.description !== undefined) payload.description = updates.description;
+  if (updates.dueDate !== undefined) payload.due_date = updates.dueDate ? updates.dueDate.toISOString() : null;
+  if (updates.assignees !== undefined) payload.assignees = updates.assignees;
+
+  const res = await fetch(`${API_URL}/api/tasks/${taskId}`, {
+    method: 'PATCH',
+    headers,
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(`Failed to update task (${res.status})`);
+  const body = await res.json();
+  const r = body.task as TaskRow & { task_assignees?: TaskAssigneeRow[] };
+  return toTask(r, r.task_assignees ?? []);
+}
+
+/**
+ * Client-side: given a typed name string and a list of workspace members,
+ * return the best-matching member (or null if no confident match).
+ * Used for the "add assignee" input in the TaskCard UI.
+ */
+export function matchMemberByName(
+  name: string,
+  members: WorkspaceMember[]
+): WorkspaceMember | null {
+  const needle = name.trim().toLowerCase();
+  if (!needle) return null;
+
+  let best: WorkspaceMember | null = null;
+  let bestScore = 0;
+
+  for (const m of members) {
+    const haystack = (m.displayName ?? '').toLowerCase();
+    const parts = haystack.split(/\s+/);
+    let score = 0;
+    if (needle === haystack) score = 100;
+    else if (needle === parts[0]) score = 80;
+    else if (parts.length > 1 && needle === parts[parts.length - 1]) score = 70;
+    else if (haystack.includes(needle) || needle.includes(haystack)) score = 50;
+
+    if (score > bestScore) {
+      bestScore = score;
+      best = m;
+    }
+  }
+
+  return bestScore >= 50 ? best : null;
 }

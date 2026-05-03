@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Workspace, Channel, Message, Action, OrchestratorStatus, ThreadSettings } from '@/types';
+import type { Workspace, Channel, Message, Action, OrchestratorStatus, ThreadSettings, Task } from '@/types';
 import type { ContextItem, FileItem, User } from '@/types';
 
 interface AppState {
@@ -17,6 +17,8 @@ interface AppState {
   actions: Action[];
   contextItems: ContextItem[];
   files: FileItem[];
+
+  tasks: Task[];
 
   // Loading (true only on the very first app load)
   dataLoading: boolean;
@@ -69,6 +71,14 @@ interface AppState {
 
   updateThreadSettings: (settings: Partial<ThreadSettings>) => void;
 
+  setTasks: (tasks: Task[]) => void;
+  upsertTask: (task: Task) => void;
+  removeTask: (taskId: string) => void;
+
+  // Clarification flow: set to a message string to auto-submit from the Composer
+  pendingSubmit: string | null;
+  setPendingSubmit: (msg: string | null) => void;
+
   markChannelAsRead: (channelId: string) => void;
 
   /** @deprecated Compatibility stub for thread-based code still in flight. */
@@ -90,6 +100,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   actions: [],
   contextItems: [],
   files: [],
+  tasks: [],
+  pendingSubmit: null,
 
   dataLoading: true,
   dataError: null,
@@ -172,6 +184,19 @@ export const useAppStore = create<AppState>((set, get) => ({
     set((state) => ({
       threadSettings: { ...state.threadSettings, ...settings },
     })),
+
+  setPendingSubmit: (msg) => set({ pendingSubmit: msg }),
+  setTasks: (tasks) => set({ tasks }),
+  upsertTask: (task) =>
+    set((state) => {
+      const idx = state.tasks.findIndex((t) => t.id === task.id);
+      if (idx === -1) return { tasks: [...state.tasks, task] };
+      const next = [...state.tasks];
+      next[idx] = task;
+      return { tasks: next };
+    }),
+  removeTask: (taskId) =>
+    set((state) => ({ tasks: state.tasks.filter((t) => t.id !== taskId) })),
 
   markChannelAsRead: (channelId) =>
     set((state) => ({

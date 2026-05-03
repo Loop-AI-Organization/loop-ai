@@ -21,6 +21,7 @@ export function Composer() {
   const [uploading, setUploading] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const handleSubmitRef = useRef<() => void>(() => {});
   const [navigationBanner, setNavigationBanner] = useState<{
     channelName?: string;
     workspaceName?: string;
@@ -34,7 +35,17 @@ export function Composer() {
     orchestratorStatus,
     addMessage,
     setOrchestratorStatus,
+    pendingSubmit,
+    setPendingSubmit,
   } = useAppStore();
+
+  // Auto-submit when a ClarifyCard option is selected
+  useEffect(() => {
+    if (!pendingSubmit) return;
+    setValue(pendingSubmit);
+    setPendingSubmit(null);
+    setTimeout(() => handleSubmitRef.current(), 0);
+  }, [pendingSubmit]);
 
   // Auto-resize textarea
   useEffect(() => {
@@ -118,6 +129,9 @@ export function Composer() {
 
     setOrchestratorStatus('ready');
   };
+
+  // Keep ref in sync so the pendingSubmit effect always calls the latest version
+  useEffect(() => { handleSubmitRef.current = handleSubmit; });
 
   const handleAttachFile = () => {
     if (!currentChannelId || !currentWorkspaceId) return;

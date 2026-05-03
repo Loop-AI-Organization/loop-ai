@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react';
-import { X, FileText, Clock, Settings2, Brain, Bookmark, File } from 'lucide-react';
+import { X, Clock, Settings2, Brain, File, ListChecks } from 'lucide-react';
 import { useAppStore } from '@/store/app-store';
-import { fetchWorkspaceFiles } from '@/lib/supabase-data';
-import type { Action, FileRecord } from '@/types';
+import { fetchWorkspaceFiles, fetchChannelTasks } from '@/lib/supabase-data';
+import { getSupabase } from '@/lib/supabase';
+import type { Action, FileRecord, Task } from '@/types';
 import { FileCard } from '@/components/file-card';
+import { TaskCard } from '@/components/task-card';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -13,15 +15,19 @@ import { ActionChip } from './action-chip';
 import { cn } from '@/lib/utils';
 
 export function InspectorPanel() {
-  const { 
-    isInspectorOpen, 
-    toggleInspector, 
-    actions, 
+  const {
+    isInspectorOpen,
+    toggleInspector,
+    actions,
     currentChannelId,
     currentWorkspaceId,
     contextItems,
     threadSettings,
     updateThreadSettings,
+    tasks,
+    setTasks,
+    upsertTask,
+    removeTask,
   } = useAppStore();
   const [workspaceFiles, setWorkspaceFiles] = useState<FileRecord[]>([]);
 
@@ -38,6 +44,73 @@ export function InspectorPanel() {
     }).catch(() => {});
     return () => { cancelled = true; };
   }, [currentWorkspaceId]);
+
+  // Load tasks for current channel + realtime subscription
+  useEffect(() => {
+    if (!currentChannelId) {
+      setTasks([]);
+      return;
+    }
+    let cancelled = false;
+    fetchChannelTasks(currentChannelId).then((list) => {
+      if (!cancelled) setTasks(list);
+    }).catch(() => {});
+
+    const supabase = getSupabase();
+    const sub = supabase
+      .channel(`tasks:channel:${currentChannelId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'tasks', filter: `channel_id=eq.${currentChannelId}` },
+        (payload) => {
+          if (payload.eventType === 'DELETE') {
+            removeTask((payload.old as { id: string }).id);
+          } else {
+            // Re-fetch to get assignees joined
+            const id = (payload.new as { id: string }).id;
+            supabase
+              .from('tasks')
+              .select('*, task_assignees(task_id, display_name, user_id, added_by, added_at)')
+              .eq('id', id)
+              .single()
+              .then(({ data }) => {
+                if (!data) return;
+                const t: Task = {
+                  id: data.id,
+                  workspaceId: data.workspace_id,
+                  channelId: data.channel_id,
+                  title: data.title,
+                  description: data.description,
+                  status: data.status,
+                  dueDate: data.due_date ? new Date(data.due_date) : null,
+                  sourceMessageId: data.source_message_id,
+                  createdBy: data.created_by,
+                  createdAt: new Date(data.created_at),
+                  updatedAt: new Date(data.updated_at),
+                  assignees: (data.task_assignees ?? []).map((a: Record<string, unknown>) => ({
+                    taskId: String(a.task_id ?? data.id),
+                    displayName: String(a.display_name ?? ''),
+                    userId: a.user_id as string | null,
+                    addedBy: a.added_by as string | null,
+                    addedAt: new Date(String(a.added_at ?? Date.now())),
+                  })),
+                };
+                upsertTask(t);
+              });
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      cancelled = true;
+      supabase.removeChannel(sub);
+    };
+  }, [currentChannelId]);
+
+  const channelTasks = tasks.filter((t) => t.channelId === currentChannelId);
+  const proposedTasks = channelTasks.filter((t) => t.status === 'proposed');
+  const activeTasks = channelTasks.filter((t) => t.status !== 'proposed');
 
   if (!isInspectorOpen) return null;
 
@@ -73,6 +146,15 @@ export function InspectorPanel() {
             <TabsTrigger value="actions" className="text-xs data-[state=active]:bg-muted">
               <Clock className="w-3.5 h-3.5 mr-1.5" />
               Actions
+            </TabsTrigger>
+            <TabsTrigger value="tasks" className="text-xs data-[state=active]:bg-muted">
+              <ListChecks className="w-3.5 h-3.5 mr-1.5" />
+              Tasks
+              {proposedTasks.length > 0 && (
+                <span className="ml-1 bg-primary text-primary-foreground text-2xs rounded-full px-1 min-w-[1rem] text-center leading-4">
+                  {proposedTasks.length}
+                </span>
+              )}
             </TabsTrigger>
             <TabsTrigger value="files" className="text-xs data-[state=active]:bg-muted">
               <File className="w-3.5 h-3.5 mr-1.5" />
@@ -115,6 +197,44 @@ export function InspectorPanel() {
                       <ActionTimelineItem key={action.id} action={action} />
                     ))}
                   </div>
+                )}
+              </div>
+            </ScrollArea>
+          </TabsContent>
+
+          {/* Tasks Tab */}
+          <TabsContent value="tasks" className="flex-1 m-0 overflow-hidden">
+            <ScrollArea className="h-full">
+              <div className="p-4 space-y-4">
+                {channelTasks.length === 0 ? (
+                  <div className="text-center py-8 text-muted-foreground text-sm">
+                    No tasks yet — ask the AI to track something
+                  </div>
+                ) : (
+                  <>
+                    {proposedTasks.length > 0 && (
+                      <div className="space-y-1.5">
+                        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                          Pending review
+                        </p>
+                        {proposedTasks.map((task) => (
+                          <TaskCard key={task.id} task={task} />
+                        ))}
+                      </div>
+                    )}
+                    {activeTasks.length > 0 && (
+                      <div className="space-y-1.5">
+                        {proposedTasks.length > 0 && (
+                          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                            Board
+                          </p>
+                        )}
+                        {activeTasks.map((task) => (
+                          <TaskCard key={task.id} task={task} compact />
+                        ))}
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             </ScrollArea>

@@ -34,16 +34,28 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     app = FastAPI(title="Loop AI Backend", lifespan=lifespan)
     settings = get_settings()
+
+    # Localhost dev origins (also covered by the regex below, kept for explicitness)
     origins = [
         "http://localhost:5173",
+        "http://localhost:8080",
         "http://127.0.0.1:5173",
-        "https://frontend-gamma-ten-16.vercel.app",
+        "http://127.0.0.1:8080",
     ]
+
+    # SITE_URL is the canonical frontend origin — include it for prod
+    site_url = settings.site_url.rstrip("/")
+    if site_url and not site_url.startswith("http://localhost") and not site_url.startswith("http://127.0.0.1"):
+        origins.append(site_url)
+
+    # CORS_ORIGIN env var: comma-separated extra origins for any additional deployments
     if settings.cors_origin:
         origins.extend(s.strip() for s in settings.cors_origin.split(",") if s.strip())
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=origins,
+        # Catch any localhost/127.0.0.1 port variant (Vite, storybook, previews, etc.)
         allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
         allow_credentials=True,
         allow_methods=["*"],

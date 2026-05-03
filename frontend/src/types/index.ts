@@ -108,3 +108,46 @@ export interface FileItem {
   uploadedAt: Date;
   url: string;
 }
+
+export type TaskStatus = 'proposed' | 'open' | 'in_progress' | 'done' | 'blocked';
+
+export type TaskEventKind =
+  | 'created'
+  | 'confirmed'
+  | 'status_changed'
+  | 'assignee_added'
+  | 'assignee_removed'
+  | 'edited'
+  | 'rejected';
+
+export interface TaskAssignee {
+  taskId: string;
+  displayName: string;
+  userId: string | null;
+  addedBy: string | null;
+  addedAt: Date;
+}
+
+export interface Task {
+  id: string;
+  workspaceId: string;
+  channelId: string;
+  title: string;
+  description: string | null;
+  status: TaskStatus;
+  dueDate: Date | null;
+  sourceMessageId: string | null;
+  createdBy: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+  assignees: TaskAssignee[];
+}
+
+export interface TaskEvent {
+  id: string;
+  taskId: string;
+  kind: TaskEventKind;
+  actorUserId: string | null;
+  payload: Record<string, unknown>;
+  createdAt: Date;
+}

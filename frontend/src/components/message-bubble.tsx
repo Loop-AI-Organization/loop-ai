@@ -1,6 +1,8 @@
 import { cn } from '@/lib/utils';
-import type { FileRecord, Message } from '@/types';
+import type { FileRecord, Message, Task, TaskAssignee } from '@/types';
 import { FileCard } from '@/components/file-card';
+import { TaskCard } from '@/components/task-card';
+import { ClarifyCard } from '@/components/clarify-card';
 import { User, Bot, Trash2 } from 'lucide-react';
 import { useRef, useEffect, useState } from 'react';
 import { useAppStore } from '@/store/app-store';
@@ -131,20 +133,39 @@ export function MessageBubble({ message, isStreaming }: MessageBubbleProps) {
   );
 }
 
-const FILE_MARKER_RE = /:::file\{id="([^"]+)"\}/g;
+// Matches :::file{id="..."}, :::task{id="..."}, and :::clarify{key="value" ...}
+const MARKER_RE = /:::(file|task)\{id="([^"]+)"\}|:::(clarify)\{([^}]+)\}/g;
 
-function parseFileMarkers(content: string) {
-  const segments: Array<{ type: 'text'; text: string } | { type: 'file'; id: string }> = [];
+type Segment =
+  | { type: 'text'; text: string }
+  | { type: 'file'; id: string }
+  | { type: 'task'; id: string }
+  | { type: 'clarify'; attrs: Record<string, string> };
+
+function parseClarifyAttrs(raw: string): Record<string, string> {
+  const result: Record<string, string> = {};
+  const re = /(\w+)="([^"]*)"/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(raw)) !== null) result[m[1]] = m[2];
+  return result;
+}
+
+function parseMarkers(content: string): Segment[] {
+  const segments: Segment[] = [];
   let lastIndex = 0;
   let match: RegExpExecArray | null;
-  FILE_MARKER_RE.lastIndex = 0;
+  MARKER_RE.lastIndex = 0;
 
-  while ((match = FILE_MARKER_RE.exec(content)) !== null) {
+  while ((match = MARKER_RE.exec(content)) !== null) {
     if (match.index > lastIndex) {
       segments.push({ type: 'text', text: content.slice(lastIndex, match.index) });
     }
-    segments.push({ type: 'file', id: match[1] });
-    lastIndex = FILE_MARKER_RE.lastIndex;
+    if (match[3] === 'clarify') {
+      segments.push({ type: 'clarify', attrs: parseClarifyAttrs(match[4]) });
+    } else {
+      segments.push({ type: match[1] as 'file' | 'task', id: match[2] });
+    }
+    lastIndex = MARKER_RE.lastIndex;
   }
   if (lastIndex < content.length) {
     segments.push({ type: 'text', text: content.slice(lastIndex) });
@@ -153,12 +174,40 @@ function parseFileMarkers(content: string) {
 }
 
 function MessageContent({ content, files }: { content: string; files?: FileRecord[] }) {
-  const segments = parseFileMarkers(content);
+  const segments = parseMarkers(content);
   const fileIds = segments.filter((s): s is { type: 'file'; id: string } => s.type === 'file').map((s) => s.id);
+  const taskIds = segments.filter((s): s is { type: 'task'; id: string } => s.type === 'task').map((s) => s.id);
+  const clarifySegments = segments.filter((s): s is { type: 'clarify'; attrs: Record<string, string> } => s.type === 'clarify');
+
+  const storeTasks = useAppStore((s) => s.tasks);
+  const upsertTask = useAppStore((s) => s.upsertTask);
 
   const [resolvedFiles, setResolvedFiles] = useState<Map<string, FileRecord>>(
     () => new Map((files || []).map((f) => [f.id, f]))
   );
+  const [resolvedTasks, setResolvedTasks] = useState<Map<string, Task>>(() => {
+    const m = new Map<string, Task>();
+    for (const t of storeTasks) {
+      if (taskIds.includes(t.id)) m.set(t.id, t);
+    }
+    return m;
+  });
+
+  // Sync store task updates into local resolved map
+  useEffect(() => {
+    if (taskIds.length === 0) return;
+    setResolvedTasks((prev) => {
+      const next = new Map(prev);
+      let changed = false;
+      for (const t of storeTasks) {
+        if (taskIds.includes(t.id)) {
+          next.set(t.id, t);
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [storeTasks]);
 
   useEffect(() => {
     if (fileIds.length === 0) return;
@@ -199,13 +248,76 @@ function MessageContent({ content, files }: { content: string; files?: FileRecor
     return () => { cancelled = true; };
   }, [content]);
 
+  useEffect(() => {
+    if (taskIds.length === 0) return;
+    const missing = taskIds.filter((id) => !resolvedTasks.has(id));
+    if (missing.length === 0) return;
+
+    let cancelled = false;
+    const supabase = getSupabase();
+    supabase
+      .from('tasks')
+      .select('*, task_assignees(task_id, display_name, user_id, added_by, added_at)')
+      .in('id', missing)
+      .then(({ data }) => {
+        if (cancelled || !data) return;
+        setResolvedTasks((prev) => {
+          const next = new Map(prev);
+          for (const r of data) {
+            const task: Task = {
+              id: r.id,
+              workspaceId: r.workspace_id,
+              channelId: r.channel_id,
+              title: r.title,
+              description: r.description,
+              status: r.status,
+              dueDate: r.due_date ? new Date(r.due_date) : null,
+              sourceMessageId: r.source_message_id,
+              createdBy: r.created_by,
+              createdAt: new Date(r.created_at),
+              updatedAt: new Date(r.updated_at),
+              assignees: (r.task_assignees ?? []).map((a: TaskAssignee & { task_id: string; added_at: string }) => ({
+                taskId: a.task_id ?? r.id,
+                displayName: a.displayName ?? (a as unknown as Record<string, string>).display_name,
+                userId: a.userId ?? (a as unknown as Record<string, string | null>).user_id,
+                addedBy: a.addedBy ?? (a as unknown as Record<string, string | null>).added_by,
+                addedAt: new Date((a as unknown as Record<string, string>).added_at ?? Date.now()),
+              })),
+            };
+            next.set(r.id, task);
+            upsertTask(task);
+          }
+          return next;
+        });
+      });
+    return () => { cancelled = true; };
+  }, [content]);
+
   return (
     <>
       {segments.map((seg, idx) => {
         if (seg.type === 'file') {
           const fileRecord = resolvedFiles.get(seg.id);
-          if (fileRecord) {
-            return <FileCard key={`file-${idx}`} file={fileRecord} />;
+          if (fileRecord) return <FileCard key={`file-${idx}`} file={fileRecord} />;
+          return null;
+        }
+        if (seg.type === 'task') {
+          const task = resolvedTasks.get(seg.id);
+          if (task) return <TaskCard key={`task-${idx}`} task={task} />;
+          return null;
+        }
+        if (seg.type === 'clarify') {
+          const { a_label, a_query, b_label, b_query } = seg.attrs;
+          if (a_label && a_query && b_label && b_query) {
+            return (
+              <ClarifyCard
+                key={`clarify-${idx}`}
+                aLabel={a_label}
+                aQuery={a_query}
+                bLabel={b_label}
+                bQuery={b_query}
+              />
+            );
           }
           return null;
         }

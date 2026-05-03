@@ -1,4 +1,4 @@
-from typing import Annotated, Optional, List
+from typing import Annotated, Dict, Optional, List
 import asyncio
 import json
 import logging
@@ -21,7 +21,16 @@ from loop_ai.orchestrator.orchestrator import (
     detect_file_intent,
     search_files,
     generate_document,
+    detect_task_intent,
+    extract_tasks_from_messages,
+    find_matching_task,
+    classify_task_novelty,
+    classify_tasks_batch,
+    export_tasks_as_document,
+    append_to_document_file,
+    detect_doc_or_task_ambiguity,
 )
+from loop_ai.tasks.assignee_resolver import resolve_assignees
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -574,6 +583,127 @@ async def log_auth_event(
     return {"ok": True}
 
 
+class TaskUpdateRequest(BaseModel):
+    status: Optional[str] = None
+    title: Optional[str] = None
+    description: Optional[str] = None
+    due_date: Optional[str] = None
+    assignees: Optional[List[str]] = None
+
+
+@router.get("/api/channels/{channel_id}/tasks")
+async def list_channel_tasks(
+    channel_id: str,
+    user: Annotated[dict, Depends(get_current_user)],
+):
+    uid = user.get("sub")
+    if not uid:
+        raise HTTPException(status_code=401, detail="Invalid user")
+    res = (
+        supabase.table("tasks")
+        .select("*, task_assignees(display_name, user_id)")
+        .eq("channel_id", channel_id)
+        .order("created_at", desc=False)
+        .execute()
+    )
+    return {"tasks": res.data or []}
+
+
+@router.post("/api/tasks/{task_id}/confirm")
+async def confirm_task(
+    task_id: str,
+    user: Annotated[dict, Depends(get_current_user)],
+):
+    uid = user.get("sub")
+    if not uid:
+        raise HTTPException(status_code=401, detail="Invalid user")
+    res = supabase.table("tasks").update({"status": "open"}).eq("id", task_id).eq("status", "proposed").execute()
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Task not found or not in proposed state")
+    supabase.table("task_events").insert({
+        "task_id": task_id,
+        "kind": "confirmed",
+        "actor_user_id": uid,
+        "payload": {},
+    }).execute()
+    return {"task": res.data[0]}
+
+
+@router.delete("/api/tasks/{task_id}")
+async def delete_task(
+    task_id: str,
+    user: Annotated[dict, Depends(get_current_user)],
+):
+    uid = user.get("sub")
+    if not uid:
+        raise HTTPException(status_code=401, detail="Invalid user")
+    task_res = supabase.table("tasks").select("id, status").eq("id", task_id).execute()
+    if not task_res.data:
+        raise HTTPException(status_code=404, detail="Task not found")
+    was_proposed = task_res.data[0].get("status") == "proposed"
+    if was_proposed:
+        supabase.table("task_events").insert({
+            "task_id": task_id,
+            "kind": "rejected",
+            "actor_user_id": uid,
+            "payload": {},
+        }).execute()
+    supabase.table("tasks").delete().eq("id", task_id).execute()
+    return {"ok": True}
+
+
+@router.patch("/api/tasks/{task_id}")
+async def update_task(
+    task_id: str,
+    body: TaskUpdateRequest,
+    user: Annotated[dict, Depends(get_current_user)],
+):
+    uid = user.get("sub")
+    if not uid:
+        raise HTTPException(status_code=401, detail="Invalid user")
+
+    valid_statuses = {"proposed", "open", "in_progress", "done", "blocked"}
+    updates: dict = {}
+    if body.status is not None:
+        if body.status not in valid_statuses:
+            raise HTTPException(status_code=400, detail=f"Invalid status: {body.status}")
+        updates["status"] = body.status
+    if body.title is not None:
+        updates["title"] = body.title
+    if body.description is not None:
+        updates["description"] = body.description
+    if body.due_date is not None:
+        updates["due_date"] = body.due_date
+
+    event_payload: dict = {}
+    if updates:
+        res = supabase.table("tasks").update(updates).eq("id", task_id).execute()
+        if not res.data:
+            raise HTTPException(status_code=404, detail="Task not found")
+        event_payload.update(updates)
+
+    if body.assignees is not None:
+        supabase.table("task_assignees").delete().eq("task_id", task_id).execute()
+        if body.assignees:
+            supabase.table("task_assignees").insert([
+                {"task_id": task_id, "display_name": name, "added_by": uid}
+                for name in body.assignees
+            ]).execute()
+        event_payload["assignees"] = body.assignees
+
+    if event_payload:
+        kind = "status_changed" if "status" in event_payload else "edited"
+        supabase.table("task_events").insert({
+            "task_id": task_id,
+            "kind": kind,
+            "actor_user_id": uid,
+            "payload": event_payload,
+        }).execute()
+
+    task_res = supabase.table("tasks").select("*, task_assignees(display_name, user_id)").eq("id", task_id).execute()
+    return {"task": task_res.data[0] if task_res.data else None}
+
+
 class ActionRequest(BaseModel):
     thread_id: str
     label: str
@@ -587,7 +717,7 @@ async def queue_action(
     # Ensure thread exists (upsert by id)
     try:
         supabase.table("threads").upsert(
-            {"id": body.thread_id},
+            {"id": thread_id},
             on_conflict="id",
         ).execute()
     except Exception:
@@ -597,7 +727,7 @@ async def queue_action(
         supabase.table("actions")
         .insert(
             {
-                "thread_id": body.thread_id,
+                "thread_id": thread_id,
                 "label": body.label,
                 "status": "pending",
             }
@@ -608,7 +738,7 @@ async def queue_action(
         raise HTTPException(500, "Failed to create action")
     action_id = action_res.data[0]["id"]
     # Enqueue job (worker will update action status)
-    job = enqueue_action(body.thread_id, body.label, action_id=action_id)
+    job = enqueue_action(thread_id, body.label, action_id=action_id)
     return {"queued": True, "job_id": job.id, "action_id": action_id}
 
 
@@ -717,6 +847,7 @@ async def ws_chat(websocket: WebSocket):
 class TriageRequest(BaseModel):
     channel_id: str
     messages: List[dict]  # [{role, content}]
+    thread_id: Optional[str] = None  # legacy compat; resolved server-side if absent
 
 
 def _get_user_channels(uid: str) -> list[dict]:
@@ -834,10 +965,13 @@ async def respond_to_ai_mention(
     if body.channel_id != channel_id:
         raise HTTPException(status_code=400, detail="channel_id mismatch")
 
+    # Resolve thread_id once — use what the client sent or look it up
+    thread_id = body.thread_id or _get_or_create_channel_thread(channel_id)
+
     logger.info(
         "triage start channel_id=%s thread_id=%s uid=%s message_count=%s",
         channel_id,
-        body.thread_id,
+        thread_id,
         uid,
         len(body.messages) if isinstance(body.messages, list) else 0,
     )
@@ -893,6 +1027,42 @@ async def respond_to_ai_mention(
             "content": f"I couldn't find a channel matching \"{query}\". Try being more specific.",
         }
 
+    # --- Step 1.5: Ambiguity pre-check (doc vs tasks) ---
+    # Run a fast classifier before the full file/task detectors to catch ambiguous phrasing
+    # and ask the user to clarify rather than silently picking the wrong intent.
+    ambiguity = await loop.run_in_executor(
+        None, lambda: detect_doc_or_task_ambiguity(messages=msgs)
+    )
+    if ambiguity.get("intent") == "ambiguous":
+        # Build a clarify message that the frontend will render as two buttons
+        last_user_msg = next(
+            (m["content"] for m in reversed(msgs) if m["role"] == "user"), ""
+        )
+        # Strip @ai mention for the follow-up messages
+        import re as _re
+        clean = _re.sub(r"@ai\b", "", last_user_msg, flags=_re.IGNORECASE).strip(" ,")
+        a_query = f"extract action items from {clean} as tasks"
+        b_query = f"create a document from {clean}"
+        clarify_marker = (
+            f':::clarify{{a_label="Save as tasks" a_query="{a_query}" '
+            f'b_label="Create a doc" b_query="{b_query}"}}'
+        )
+        content = f"Did you want to track those as tasks or create a document?\n\n{clarify_marker}"
+        try:
+            result = supabase.table("messages").insert({
+                "thread_id": thread_id,
+                "role": "assistant",
+                "content": content,
+            }).execute()
+            saved = result.data[0] if result.data else None
+        except Exception:
+            saved = None
+        return {
+            "should_respond": True,
+            "message_id": saved["id"] if saved else None,
+            "content": content,
+        }
+
     # --- Step 2: Detect file intent ---
     logger.info("triage phase=file_intent channel_id=%s", channel_id)
     file_intent = await loop.run_in_executor(
@@ -930,7 +1100,7 @@ async def respond_to_ai_mention(
                         supabase.table("messages")
                         .insert(
                             {
-                                "thread_id": body.thread_id,
+                                "thread_id": thread_id,
                                 "role": "assistant",
                                 "content": content,
                             }
@@ -953,7 +1123,7 @@ async def respond_to_ai_mention(
                         supabase.table("messages")
                         .insert(
                             {
-                                "thread_id": body.thread_id,
+                                "thread_id": thread_id,
                                 "role": "assistant",
                                 "content": content,
                             }
@@ -998,7 +1168,7 @@ async def respond_to_ai_mention(
                 content = f"I created \"{doc_title}\":\n\n{file_marker}"
                 try:
                     result = supabase.table("messages").insert({
-                        "thread_id": body.thread_id,
+                        "thread_id": thread_id,
                         "role": "assistant",
                         "content": content,
                     }).execute()
@@ -1015,6 +1185,573 @@ async def respond_to_ai_mention(
                 content = "I couldn't generate the document — there may not be enough messages in the specified time range."
                 return {"should_respond": True, "content": content}
 
+    if file_intent.get("is_file_intent") and file_intent.get("intent_type") == "export_tasks":
+        ch_res = supabase.table("channels").select("workspace_id").eq("id", channel_id).execute()
+        workspace_id = ch_res.data[0]["workspace_id"] if ch_res.data else None
+        if workspace_id:
+            doc_title = file_intent.get("doc_title") or "Task List"
+            generated = await loop.run_in_executor(
+                None,
+                lambda cid=channel_id, wid=workspace_id, dt=doc_title, cb=uid: export_tasks_as_document(
+                    channel_id=cid,
+                    workspace_id=wid,
+                    title=dt,
+                    created_by=cb,
+                ),
+            )
+            if generated:
+                file_marker = f':::file{{id="{generated["id"]}"}}'
+                content = f"Here's the task export:\n\n{file_marker}"
+            else:
+                content = "There are no confirmed tasks in this channel to export yet."
+            try:
+                result = supabase.table("messages").insert({
+                    "thread_id": thread_id,
+                    "role": "assistant",
+                    "content": content,
+                }).execute()
+                saved = result.data[0] if result.data else None
+            except Exception:
+                saved = None
+            return {
+                "should_respond": True,
+                "message_id": saved["id"] if saved else None,
+                "content": content,
+                **({"files": [generated]} if generated else {}),
+            }
+
+    if file_intent.get("is_file_intent") and file_intent.get("intent_type") == "append_to_document":
+        ch_res = supabase.table("channels").select("workspace_id").eq("id", channel_id).execute()
+        workspace_id = ch_res.data[0]["workspace_id"] if ch_res.data else None
+        if workspace_id:
+            target_query = file_intent.get("target_file_query") or ""
+            section_title = file_intent.get("doc_title") or "Appended Section"
+            time_range = int(file_intent.get("time_range_days") or 7)
+            instructions = file_intent.get("instructions") or "summarize the key points"
+
+            # Find the target file
+            ws_id = workspace_id
+            tq = target_query
+            target_files = await loop.run_in_executor(
+                None, lambda w=ws_id, q=tq: search_files(workspace_id=w, query=q)
+            )
+            if not target_files:
+                content = f"I couldn't find a file matching \"{target_query}\"."
+                try:
+                    result = supabase.table("messages").insert({
+                        "thread_id": thread_id,
+                        "role": "assistant",
+                        "content": content,
+                    }).execute()
+                    saved = result.data[0] if result.data else None
+                except Exception:
+                    saved = None
+                return {
+                    "should_respond": True,
+                    "message_id": saved["id"] if saved else None,
+                    "content": content,
+                }
+
+            target_file = target_files[0]
+            target_file_id = target_file["id"]
+
+            # Generate the section content from messages
+            cid = channel_id
+            wid = workspace_id
+            st = section_title
+            tr = time_range
+            inst = instructions
+            cb = uid
+            section_doc = await loop.run_in_executor(
+                None,
+                lambda: generate_document(
+                    channel_id=cid,
+                    workspace_id=wid,
+                    title=st,
+                    time_range_days=tr,
+                    instructions=inst,
+                    created_by=cb,
+                ),
+            )
+
+            if not section_doc:
+                content = "I couldn't generate the section — there may not be enough messages in the specified time range."
+                return {"should_respond": True, "content": content}
+
+            # Download the section content from storage and use it as the appended text
+            try:
+                section_bytes = supabase.storage.from_("workspace-files").download(section_doc["storage_path"])
+                section_text = section_bytes.decode("utf-8")
+            except Exception:
+                section_text = f"*(Could not retrieve generated section content)*"
+
+            # Clean up the temporary section file
+            try:
+                supabase.storage.from_("workspace-files").remove([section_doc["storage_path"]])
+                supabase.table("files").delete().eq("id", section_doc["id"]).execute()
+            except Exception:
+                pass
+
+            fid = target_file_id
+            wid2 = workspace_id
+            st2 = section_title
+            sc = section_text
+            updated_file = await loop.run_in_executor(
+                None,
+                lambda: append_to_document_file(
+                    file_id=fid,
+                    workspace_id=wid2,
+                    section_title=st2,
+                    section_content=sc,
+                ),
+            )
+
+            if updated_file:
+                file_marker = f':::file{{id="{updated_file["id"]}"}}'
+                content = f"I appended \"{section_title}\" to **{target_file['file_name']}**:\n\n{file_marker}"
+            else:
+                content = f"I couldn't append to \"{target_file['file_name']}\"."
+
+            try:
+                result = supabase.table("messages").insert({
+                    "thread_id": thread_id,
+                    "role": "assistant",
+                    "content": content,
+                }).execute()
+                saved = result.data[0] if result.data else None
+            except Exception:
+                saved = None
+            return {
+                "should_respond": True,
+                "message_id": saved["id"] if saved else None,
+                "content": content,
+                **({"files": [updated_file]} if updated_file else {}),
+            }
+
+    # --- Step 2.5: Detect task intent ---
+    logger.info("triage phase=task_intent channel_id=%s", channel_id)
+    task_intent = await loop.run_in_executor(
+        None, lambda: detect_task_intent(messages=msgs)
+    )
+    logger.info(
+        "triage phase=task_intent_done is_task_intent=%s intent_type=%s",
+        task_intent.get("is_task_intent"),
+        task_intent.get("intent_type"),
+    )
+
+    if task_intent.get("is_task_intent"):
+        ch_res = supabase.table("channels").select("workspace_id").eq("id", channel_id).execute()
+        workspace_id = ch_res.data[0]["workspace_id"] if ch_res.data else None
+
+        if not workspace_id:
+            return {"should_respond": True, "content": "I couldn't determine your workspace."}
+
+        intent_type = task_intent.get("intent_type")
+
+        # --- list_tasks ---
+        if intent_type == "list_tasks":
+            tasks_res = (
+                supabase.table("tasks")
+                .select("id, title, status, task_assignees(display_name)")
+                .eq("channel_id", channel_id)
+                .neq("status", "proposed")
+                .order("created_at", desc=False)
+                .execute()
+            )
+            tasks = tasks_res.data or []
+            if not tasks:
+                content = "There are no tasks in this channel yet."
+            else:
+                markers = "\n".join(f':::task{{id="{t["id"]}"}}' for t in tasks)
+                content = f"Here are the tasks in this channel:\n\n{markers}"
+            try:
+                result = supabase.table("messages").insert({
+                    "thread_id": thread_id,
+                    "role": "assistant",
+                    "content": content,
+                }).execute()
+                saved = result.data[0] if result.data else None
+            except Exception:
+                saved = None
+            return {
+                "should_respond": True,
+                "message_id": saved["id"] if saved else None,
+                "content": content,
+                "tasks": tasks,
+            }
+
+        # --- create_task ---
+        if intent_type == "create_task":
+            title = task_intent.get("title") or "Untitled task"
+            description = task_intent.get("description")
+            assignees = task_intent.get("assignees") or []
+            due_date_str = task_intent.get("due_date")
+
+            # Phase 4: classify against existing tasks before creating
+            existing_res = (
+                supabase.table("tasks")
+                .select("id, title, status")
+                .eq("channel_id", channel_id)
+                .neq("status", "proposed")
+                .execute()
+            )
+            existing_tasks = existing_res.data or []
+            t_title = title
+            t_desc = description
+            ex = existing_tasks
+            classification = await loop.run_in_executor(
+                None,
+                lambda tt=t_title, td=t_desc, e=ex: classify_task_novelty(
+                    title=tt, description=td, existing_tasks=e
+                ),
+            )
+
+            if classification["kind"] == "duplicate":
+                matched_id = classification.get("task_id")
+                reason = classification.get("reason", "")
+                if matched_id:
+                    content = f"This looks like it already exists ({reason}):\n\n:::task{{id=\"{matched_id}\"}}"
+                else:
+                    content = f"This looks like a duplicate of an existing task ({reason})."
+                try:
+                    result = supabase.table("messages").insert({
+                        "thread_id": thread_id,
+                        "role": "assistant",
+                        "content": content,
+                    }).execute()
+                    saved = result.data[0] if result.data else None
+                except Exception:
+                    saved = None
+                return {
+                    "should_respond": True,
+                    "message_id": saved["id"] if saved else None,
+                    "content": content,
+                }
+
+            if classification["kind"] == "update":
+                matched_id = classification.get("task_id")
+                suggested_status = classification.get("suggested_status")
+                reason = classification.get("reason", "")
+                if matched_id and suggested_status:
+                    supabase.table("tasks").update({"status": suggested_status}).eq("id", matched_id).execute()
+                    supabase.table("task_events").insert({
+                        "task_id": matched_id,
+                        "kind": "status_changed",
+                        "actor_user_id": uid,
+                        "payload": {"status": suggested_status, "reason": reason, "inferred_from_message": True},
+                    }).execute()
+                    content = f"Updated the existing task ({reason}):\n\n:::task{{id=\"{matched_id}\"}}"
+                elif matched_id:
+                    content = f"This looks like an update to an existing task ({reason}):\n\n:::task{{id=\"{matched_id}\"}}"
+                else:
+                    content = f"This looks like an update to existing work ({reason}). Let me know which task to update."
+                try:
+                    result = supabase.table("messages").insert({
+                        "thread_id": thread_id,
+                        "role": "assistant",
+                        "content": content,
+                    }).execute()
+                    saved = result.data[0] if result.data else None
+                except Exception:
+                    saved = None
+                return {
+                    "should_respond": True,
+                    "message_id": saved["id"] if saved else None,
+                    "content": content,
+                }
+
+            # kind == "new" — create as proposed
+            task_row = {
+                "workspace_id": workspace_id,
+                "channel_id": channel_id,
+                "title": title,
+                "description": description,
+                "status": "proposed",
+                "created_by": uid,
+            }
+            if due_date_str:
+                task_row["due_date"] = due_date_str
+
+            task_res = supabase.table("tasks").insert(task_row).execute()
+            if not task_res.data:
+                return {"should_respond": True, "content": "I couldn't create the task right now."}
+            task = task_res.data[0]
+            task_id = task["id"]
+
+            if assignees:
+                settings = get_settings()
+                raw_names = assignees
+                ws_id = workspace_id
+                resolved = await loop.run_in_executor(
+                    None,
+                    lambda n=raw_names, w=ws_id: resolve_assignees(
+                        workspace_id=w,
+                        names=n,
+                        supabase_url=str(settings.supabase_url),
+                        service_role_key=settings.supabase_service_role_key,
+                    ),
+                )
+                supabase.table("task_assignees").insert([
+                    {"task_id": task_id, "display_name": r["display_name"], "user_id": r["user_id"], "added_by": uid}
+                    for r in resolved
+                ]).execute()
+                assignees = [r["display_name"] for r in resolved]
+
+            supabase.table("task_events").insert({
+                "task_id": task_id,
+                "kind": "created",
+                "actor_user_id": uid,
+                "payload": {"title": title, "assignees": assignees},
+            }).execute()
+
+            content = f"I've added a task for review:\n\n:::task{{id=\"{task_id}\"}}"
+            try:
+                result = supabase.table("messages").insert({
+                    "thread_id": thread_id,
+                    "role": "assistant",
+                    "content": content,
+                }).execute()
+                saved = result.data[0] if result.data else None
+            except Exception:
+                saved = None
+            return {
+                "should_respond": True,
+                "message_id": saved["id"] if saved else None,
+                "content": content,
+                "tasks": [task],
+            }
+
+        # --- update_task ---
+        if intent_type == "update_task":
+            reference = task_intent.get("task_reference") or ""
+            updates = task_intent.get("updates") or {}
+
+            existing_res = (
+                supabase.table("tasks")
+                .select("id, title, status")
+                .eq("channel_id", channel_id)
+                .execute()
+            )
+            existing = existing_res.data or []
+            ws_ref = reference
+            ex_tasks = existing
+            task_id = await loop.run_in_executor(
+                None, lambda r=ws_ref, t=ex_tasks: find_matching_task(reference=r, tasks=t)
+            )
+
+            if not task_id:
+                content = f"I couldn't find a task matching \"{reference}\"."
+                try:
+                    result = supabase.table("messages").insert({
+                        "thread_id": thread_id,
+                        "role": "assistant",
+                        "content": content,
+                    }).execute()
+                    saved = result.data[0] if result.data else None
+                except Exception:
+                    saved = None
+                return {
+                    "should_respond": True,
+                    "message_id": saved["id"] if saved else None,
+                    "content": content,
+                }
+
+            task_updates: dict = {}
+            if updates.get("status"):
+                task_updates["status"] = updates["status"]
+
+            event_payload: dict = {}
+            if task_updates:
+                supabase.table("tasks").update(task_updates).eq("id", task_id).execute()
+                event_payload.update(task_updates)
+
+            if updates.get("assignees"):
+                new_assignees = updates["assignees"]
+                supabase.table("task_assignees").delete().eq("task_id", task_id).execute()
+                supabase.table("task_assignees").insert([
+                    {"task_id": task_id, "display_name": name, "added_by": uid}
+                    for name in new_assignees
+                ]).execute()
+                event_payload["assignees"] = new_assignees
+
+            if event_payload:
+                supabase.table("task_events").insert({
+                    "task_id": task_id,
+                    "kind": "status_changed" if "status" in event_payload else "assignee_added",
+                    "actor_user_id": uid,
+                    "payload": event_payload,
+                }).execute()
+
+            content = f"Done — task updated:\n\n:::task{{id=\"{task_id}\"}}"
+            try:
+                result = supabase.table("messages").insert({
+                    "thread_id": thread_id,
+                    "role": "assistant",
+                    "content": content,
+                }).execute()
+                saved = result.data[0] if result.data else None
+            except Exception:
+                saved = None
+            return {
+                "should_respond": True,
+                "message_id": saved["id"] if saved else None,
+                "content": content,
+            }
+
+        # --- extract_tasks ---
+        if intent_type == "extract_tasks":
+            time_range = int(task_intent.get("time_range_days") or 7)
+            cid = channel_id
+            extracted = await loop.run_in_executor(
+                None,
+                lambda c=cid, tr=time_range: extract_tasks_from_messages(
+                    channel_id=c, time_range_days=tr
+                ),
+            )
+            if not extracted:
+                content = "I didn't find any action items in the specified time range."
+                try:
+                    result = supabase.table("messages").insert({
+                        "thread_id": thread_id,
+                        "role": "assistant",
+                        "content": content,
+                    }).execute()
+                    saved = result.data[0] if result.data else None
+                except Exception:
+                    saved = None
+                return {
+                    "should_respond": True,
+                    "message_id": saved["id"] if saved else None,
+                    "content": content,
+                }
+
+            # Phase 4: batch-classify all candidates against existing tasks
+            existing_res = (
+                supabase.table("tasks")
+                .select("id, title, status")
+                .eq("channel_id", channel_id)
+                .neq("status", "proposed")
+                .execute()
+            )
+            existing_tasks = existing_res.data or []
+            ext_copy = extracted
+            ex_copy = existing_tasks
+            classifications = await loop.run_in_executor(
+                None,
+                lambda c=ext_copy, e=ex_copy: classify_tasks_batch(candidates=c, existing_tasks=e),
+            )
+
+            # Apply updates for "update" classified items
+            for item, cls in zip(extracted, classifications):
+                if cls["kind"] == "update" and cls.get("task_id") and cls.get("suggested_status"):
+                    supabase.table("tasks").update({"status": cls["suggested_status"]}).eq("id", cls["task_id"]).execute()
+                    supabase.table("task_events").insert({
+                        "task_id": cls["task_id"],
+                        "kind": "status_changed",
+                        "actor_user_id": uid,
+                        "payload": {
+                            "status": cls["suggested_status"],
+                            "reason": cls.get("reason", ""),
+                            "inferred_from_message": True,
+                        },
+                    }).execute()
+
+            # Only create rows for genuinely new items
+            new_items = [
+                (item, cls)
+                for item, cls in zip(extracted, classifications)
+                if cls["kind"] == "new"
+            ]
+
+            # Batch-resolve all unique assignee names for new items only
+            all_names = list({n for item, _ in new_items for n in (item.get("assignees") or [])})
+            resolved_map: Dict[str, Dict] = {}
+            if all_names:
+                settings = get_settings()
+                ws_id = workspace_id
+                resolved_list = await loop.run_in_executor(
+                    None,
+                    lambda n=all_names, w=ws_id: resolve_assignees(
+                        workspace_id=w,
+                        names=n,
+                        supabase_url=str(settings.supabase_url),
+                        service_role_key=settings.supabase_service_role_key,
+                    ),
+                )
+                for orig, res in zip(all_names, resolved_list):
+                    resolved_map[orig] = res
+
+            created_tasks = []
+            for item, _ in new_items:
+                task_row = {
+                    "workspace_id": workspace_id,
+                    "channel_id": channel_id,
+                    "title": item.get("title", "Untitled"),
+                    "description": item.get("description"),
+                    "status": "proposed",
+                    "created_by": uid,
+                }
+                if item.get("due_date"):
+                    task_row["due_date"] = item["due_date"]
+                task_res = supabase.table("tasks").insert(task_row).execute()
+                if not task_res.data:
+                    continue
+                task = task_res.data[0]
+                task_id = task["id"]
+                raw_assignees = item.get("assignees") or []
+                resolved_assignees = [resolved_map.get(n, {"display_name": n, "user_id": None}) for n in raw_assignees]
+                if resolved_assignees:
+                    supabase.table("task_assignees").insert([
+                        {"task_id": task_id, "display_name": r["display_name"], "user_id": r["user_id"], "added_by": uid}
+                        for r in resolved_assignees
+                    ]).execute()
+                supabase.table("task_events").insert({
+                    "task_id": task_id,
+                    "kind": "created",
+                    "actor_user_id": uid,
+                    "payload": {
+                        "title": task["title"],
+                        "assignees": [r["display_name"] for r in resolved_assignees],
+                        "source": "extracted",
+                    },
+                }).execute()
+                created_tasks.append(task)
+
+            # Count skipped items for the summary message
+            n_dupes = sum(1 for _, cls in zip(extracted, classifications) if cls["kind"] == "duplicate")
+            n_updates = sum(1 for _, cls in zip(extracted, classifications) if cls["kind"] == "update")
+
+            if not created_tasks and (n_dupes > 0 or n_updates > 0):
+                parts = []
+                if n_updates:
+                    parts.append(f"applied {n_updates} update(s) to existing tasks")
+                if n_dupes:
+                    parts.append(f"skipped {n_dupes} duplicate(s)")
+                content = f"No new tasks found — {', '.join(parts)}."
+            else:
+                markers = "\n".join(f':::task{{id="{t["id"]}"}}' for t in created_tasks)
+                content = f"I found {len(created_tasks)} new action item(s) for review"
+                if n_updates:
+                    content += f" (also applied {n_updates} update(s) to existing tasks)"
+                if n_dupes:
+                    content += f" (skipped {n_dupes} duplicate(s))"
+                content += f":\n\n{markers}"
+            try:
+                result = supabase.table("messages").insert({
+                    "thread_id": thread_id,
+                    "role": "assistant",
+                    "content": content,
+                }).execute()
+                saved = result.data[0] if result.data else None
+            except Exception:
+                saved = None
+            return {
+                "should_respond": True,
+                "message_id": saved["id"] if saved else None,
+                "content": content,
+                "tasks": created_tasks,
+            }
+
     # --- Step 3: Normal AI response ---
     logger.info("triage phase=generate_full_response channel_id=%s", channel_id)
     response_content = await loop.run_in_executor(
@@ -1030,7 +1767,6 @@ async def respond_to_ai_mention(
 
     # Save assistant message to Supabase (thread compatibility path)
     try:
-        thread_id = _get_or_create_channel_thread(body.channel_id)
         result = (
             supabase.table("messages")
             .insert({

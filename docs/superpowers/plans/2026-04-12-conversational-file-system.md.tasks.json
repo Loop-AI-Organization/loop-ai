@@ -1,0 +1,69 @@
+{
+  "planPath": "docs/superpowers/plans/2026-04-12-conversational-file-system.md",
+  "tasks": [
+    {
+      "id": 7,
+      "subject": "Task 0: Database Migration - files table",
+      "status": "completed",
+      "lastUpdated": "2026-04-12T10:00:00Z",
+      "description": "**Goal:** Create the `files` table with all columns, indexes, and RLS policies. Drop `thread_files`.\n\n**Files:**\n- Create: `supabase/migrations/20260412000000_files_table.sql`\n- Modify: `supabase/setup_tables_manual.sql`\n\n**Verify:** `npx supabase db push --linked` succeeds\n\n```json:metadata\n{\"files\": [\"supabase/migrations/20260412000000_files_table.sql\", \"supabase/setup_tables_manual.sql\"], \"verifyCommand\": \"npx supabase db push --linked\", \"acceptanceCriteria\": [\"files table with all columns\", \"CHECK constraints\", \"GIN index on tags\", \"RLS policies\", \"thread_files dropped\"]}\n```"
+    },
+    {
+      "id": 8,
+      "subject": "Task 1: Frontend Types and Data Layer for Files",
+      "status": "pending",
+      "blockedBy": [7],
+      "description": "**Goal:** Add `FileRecord` type, Supabase query functions, and backend API helpers. Remove deprecated `ThreadFile`.\n\n**Files:**\n- Modify: `frontend/src/types/index.ts`\n- Modify: `frontend/src/lib/supabase-data.ts`\n\n**Verify:** `cd frontend && npx tsc --noEmit`\n\n```json:metadata\n{\"files\": [\"frontend/src/types/index.ts\", \"frontend/src/lib/supabase-data.ts\"], \"verifyCommand\": \"cd frontend && npx tsc --noEmit\", \"acceptanceCriteria\": [\"FileRecord type\", \"fetchWorkspaceFiles\", \"uploadFile\", \"getFileDownloadUrl\", \"ThreadFile removed\"]}\n```"
+    },
+    {
+      "id": 9,
+      "subject": "Task 2: Backend Upload and Download Endpoints",
+      "status": "pending",
+      "blockedBy": [7],
+      "description": "**Goal:** Add `POST /api/files/upload` and `GET /api/files/{file_id}/download`. Remove old `POST /api/signed-upload`.\n\n**Files:**\n- Modify: `backend/app/routes.py`\n\n**Verify:** `python3 -c \"import ast; ast.parse(open('backend/app/routes.py').read()); print('OK')\"`\n\n```json:metadata\n{\"files\": [\"backend/app/routes.py\"], \"verifyCommand\": \"python3 -c \\\"import ast; ast.parse(open('backend/app/routes.py').read()); print('OK')\\\"\", \"acceptanceCriteria\": [\"upload endpoint\", \"download endpoint\", \"old signed-upload removed\"]}\n```"
+    },
+    {
+      "id": 10,
+      "subject": "Task 3: Orchestrator - File Intent Detection and Search",
+      "status": "pending",
+      "blockedBy": [7, 9],
+      "description": "**Goal:** Add `detect_file_intent()` and `search_files()` to orchestrator, wire into triage endpoint.\n\n**Files:**\n- Modify: `backend/loop_ai/orchestrator/orchestrator.py`\n- Modify: `backend/app/routes.py`\n\n**Verify:** `python3 -c \"import ast; ast.parse(open('backend/loop_ai/orchestrator/orchestrator.py').read()); print('OK')\"`\n\n```json:metadata\n{\"files\": [\"backend/loop_ai/orchestrator/orchestrator.py\", \"backend/app/routes.py\"], \"verifyCommand\": \"python3 -c \\\"import ast; ast.parse(open('backend/loop_ai/orchestrator/orchestrator.py').read()); print('OK')\\\"\", \"acceptanceCriteria\": [\"detect_file_intent function\", \"search_files function\", \"triage integration\", \"file markers in response\"]}\n```"
+    },
+    {
+      "id": 11,
+      "subject": "Task 4: Orchestrator - Document Generation",
+      "status": "pending",
+      "blockedBy": [10],
+      "description": "**Goal:** Add `generate_document()` to orchestrator and wire into triage endpoint.\n\n**Files:**\n- Modify: `backend/loop_ai/orchestrator/orchestrator.py`\n- Modify: `backend/app/routes.py`\n\n**Verify:** `python3 -c \"import ast; ast.parse(open('backend/loop_ai/orchestrator/orchestrator.py').read()); print('OK')\"`\n\n```json:metadata\n{\"files\": [\"backend/loop_ai/orchestrator/orchestrator.py\", \"backend/app/routes.py\"], \"verifyCommand\": \"python3 -c \\\"import ast; ast.parse(open('backend/loop_ai/orchestrator/orchestrator.py').read()); print('OK')\\\"\", \"acceptanceCriteria\": [\"generate_document function\", \"triage create_document handling\", \"source=generated\", \"metadata_status=ready\"]}\n```"
+    },
+    {
+      "id": 12,
+      "subject": "Task 5: Background Metadata Enrichment Worker",
+      "status": "pending",
+      "blockedBy": [7],
+      "description": "**Goal:** Add `_enrich_file_metadata()` to worker for background metadata generation.\n\n**Files:**\n- Modify: `backend/worker.py`\n\n**Verify:** `python3 -c \"import ast; ast.parse(open('backend/worker.py').read()); print('OK')\"`\n\n```json:metadata\n{\"files\": [\"backend/worker.py\"], \"verifyCommand\": \"python3 -c \\\"import ast; ast.parse(open('backend/worker.py').read()); print('OK')\\\"\", \"acceptanceCriteria\": [\"enrich handler\", \"content download\", \"LLM metadata generation\", \"status updates\"]}\n```"
+    },
+    {
+      "id": 13,
+      "subject": "Task 6: Inline FileCard Component",
+      "status": "pending",
+      "blockedBy": [8],
+      "description": "**Goal:** Create FileCard component and update MessageContent to parse `:::file{id}` markers.\n\n**Files:**\n- Create: `frontend/src/components/file-card.tsx`\n- Modify: `frontend/src/components/message-bubble.tsx`\n- Modify: `frontend/src/types/index.ts`\n- Modify: `frontend/src/components/composer.tsx`\n- Modify: `frontend/src/lib/supabase-data.ts`\n\n**Verify:** `cd frontend && npx tsc --noEmit`\n\n```json:metadata\n{\"files\": [\"frontend/src/components/file-card.tsx\", \"frontend/src/components/message-bubble.tsx\", \"frontend/src/types/index.ts\", \"frontend/src/components/composer.tsx\", \"frontend/src/lib/supabase-data.ts\"], \"verifyCommand\": \"cd frontend && npx tsc --noEmit\", \"acceptanceCriteria\": [\"FileCard component\", \"file marker parsing\", \"files data flow\", \"pending state\"]}\n```"
+    },
+    {
+      "id": 14,
+      "subject": "Task 7: Update Composer Upload and Inspector Panel",
+      "status": "pending",
+      "blockedBy": [8, 13],
+      "description": "**Goal:** Update composer upload flow and inspector to use files table.\n\n**Files:**\n- Modify: `frontend/src/components/composer.tsx`\n- Modify: `frontend/src/components/inspector-panel.tsx`\n\n**Verify:** `cd frontend && npx tsc --noEmit` and `grep -r \"thread_files|ThreadFile\" frontend/src/` returns nothing\n\n```json:metadata\n{\"files\": [\"frontend/src/components/composer.tsx\", \"frontend/src/components/inspector-panel.tsx\"], \"verifyCommand\": \"cd frontend && npx tsc --noEmit\", \"acceptanceCriteria\": [\"upload flow updated\", \"inspector updated\", \"no thread_files references\"]}\n```"
+    },
+    {
+      "id": 15,
+      "subject": "Task 8: End-to-End Verification",
+      "status": "pending",
+      "blockedBy": [10, 11, 12, 13, 14],
+      "description": "**Goal:** Verify full flow works end-to-end.\n\n**Verify:** `cd frontend && npx tsc --noEmit` and Python syntax checks pass\n\n```json:metadata\n{\"files\": [], \"verifyCommand\": \"cd frontend && npx tsc --noEmit\", \"acceptanceCriteria\": [\"upload flow\", \"inspector\", \"file search\", \"doc generation\", \"download\", \"no errors\"]}\n```"
+    }
+  ],
+  "lastUpdated": "2026-04-12T09:15:00Z"
+}

@@ -26,7 +26,7 @@ npm install
 npm run dev
 ```
 
-App runs at **http://localhost:8080**.
+App runs at **http://localhost:5173**.
 
 Set up `frontend/.env` from `frontend/.env.example`: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, and `VITE_API_URL=http://localhost:4000` (and `VITE_BACKEND_WS_URL=ws://localhost:4000/ws` if using streaming). You can sync from the root `.env` with `node scripts/sync-env.js` (see [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md)).
 
