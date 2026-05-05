@@ -21,6 +21,7 @@ const API_URL = import.meta.env.VITE_API_URL ?? 'https://api.loopai-project.me';
 interface WorkspaceRow {
   id: string;
   user_id: string;
+  owner_id?: string | null;
   name: string;
   icon: string;
   created_at: string;
@@ -56,7 +57,7 @@ interface MessageRow {
 }
 
 function toWorkspace(r: WorkspaceRow): Workspace {
-  return { id: r.id, name: r.name, icon: r.icon, ownerId: r.user_id };
+  return { id: r.id, name: r.name, icon: r.icon, ownerId: r.owner_id ?? r.user_id };
 }
 
 function toChannel(r: ChannelRow): Channel {
@@ -105,12 +106,60 @@ export async function updateAccountProfile(displayName: string): Promise<void> {
 
 export async function fetchWorkspaces(): Promise<Workspace[]> {
   const supabase = getSupabase();
-  const { data, error } = await supabase
+  const { data: { user }, error: userError } = await supabase.auth.getUser();
+  if (userError) throw userError;
+  if (!user) return [];
+
+  const ownedByUserIdQuery = supabase
     .from('workspaces')
-    .select('id, user_id, name, icon, created_at')
-    .order('created_at', { ascending: true });
-  if (error) throw error;
-  return (data as WorkspaceRow[]).map(toWorkspace);
+    .select('id, user_id, owner_id, name, icon, created_at')
+    .eq('user_id', user.id);
+
+  const ownedByOwnerIdQuery = supabase
+    .from('workspaces')
+    .select('id, user_id, owner_id, name, icon, created_at')
+    .eq('owner_id', user.id);
+
+  const memberRowsQuery = supabase
+    .from('workspace_members')
+    .select('workspace_id')
+    .eq('user_id', user.id);
+
+  const [
+    { data: ownedByUserRows, error: ownedByUserError },
+    { data: ownedByOwnerRows, error: ownedByOwnerError },
+    { data: memberRows, error: memberError },
+  ] = await Promise.all([ownedByUserIdQuery, ownedByOwnerIdQuery, memberRowsQuery]);
+  if (ownedByUserError) throw ownedByUserError;
+  if (ownedByOwnerError) throw ownedByOwnerError;
+  if (memberError) throw memberError;
+
+  const ownedRows = [
+    ...((ownedByUserRows as WorkspaceRow[] | null) ?? []),
+    ...((ownedByOwnerRows as WorkspaceRow[] | null) ?? []),
+  ];
+  const ownedIds = new Set(ownedRows.map((r) => r.id));
+  const memberWorkspaceIds = Array.from(
+    new Set((memberRows ?? []).map((r: { workspace_id: string }) => r.workspace_id).filter(Boolean))
+  ).filter((id) => !ownedIds.has(id));
+
+  let memberWorkspaces: WorkspaceRow[] = [];
+  if (memberWorkspaceIds.length > 0) {
+    const { data: memberRowsDetailed, error: memberWsError } = await supabase
+      .from('workspaces')
+      .select('id, user_id, owner_id, name, icon, created_at')
+      .in('id', memberWorkspaceIds);
+    if (memberWsError) throw memberWsError;
+    memberWorkspaces = (memberRowsDetailed as WorkspaceRow[]) ?? [];
+  }
+
+  const uniqueById = new Map<string, WorkspaceRow>();
+  for (const row of ownedRows) uniqueById.set(row.id, row);
+  for (const row of memberWorkspaces) uniqueById.set(row.id, row);
+
+  return Array.from(uniqueById.values())
+    .sort((a, b) => a.created_at.localeCompare(b.created_at))
+    .map(toWorkspace);
 }
 
 export async function createWorkspace(params: { name?: string; icon?: string }): Promise<Workspace> {
@@ -121,10 +170,11 @@ export async function createWorkspace(params: { name?: string; icon?: string }):
     .from('workspaces')
     .insert({
       user_id: user.id,
+      owner_id: user.id,
       name: params.name ?? 'My Workspace',
       icon: params.icon ?? '◎',
     })
-    .select('id, user_id, name, icon, created_at')
+    .select('id, user_id, owner_id, name, icon, created_at')
     .single();
   if (error) throw error;
   const workspace = toWorkspace(data as WorkspaceRow);
@@ -410,14 +460,17 @@ export async function createDmChannel(workspaceId: string, otherUserId: string):
 }
 
 export async function createChannel(workspaceId: string, name: string, type: 'project' | 'dm' = 'project'): Promise<Channel> {
-  const supabase = getSupabase();
-  const { data, error } = await supabase
-    .from('channels')
-    .insert({ workspace_id: workspaceId, name, type })
-    .select('id, workspace_id, name, type, is_llm_restricted, llm_participation_enabled, created_at')
-    .single();
-  if (error) throw error;
-  return toChannel(data as ChannelRow);
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${API_URL}/api/workspaces/${workspaceId}/channels`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ name, type }),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(body.detail ?? body.message ?? `Failed to create channel (${res.status})`);
+  }
+  return toChannel(body as ChannelRow);
 }
 
 export async function fetchThreads(channelId: string): Promise<Thread[]> {

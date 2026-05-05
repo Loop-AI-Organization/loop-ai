@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { X, Clock, Settings2, Brain, File, ListChecks, FileText, Bookmark, BotOff } from 'lucide-react';
+import { X, Clock, Brain, File, ListChecks, FileText, Bookmark, BotOff } from 'lucide-react';
 import { useAppStore } from '@/store/app-store';
 import { fetchWorkspaceFiles, fetchChannelTasks, updateChannelSettings } from '@/lib/supabase-data';
 import { getSupabase } from '@/lib/supabase';
@@ -182,11 +182,34 @@ export function InspectorPanel() {
               <File className="w-3.5 h-3.5 mr-1.5" />
               Files
             </TabsTrigger>
-            <TabsTrigger value="settings" className="text-xs data-[state=active]:bg-muted">
-              <Settings2 className="w-3.5 h-3.5 mr-1.5" />
-              Settings
-            </TabsTrigger>
           </TabsList>
+
+          {/* Always-visible AI controls */}
+          <div className="border-b border-border px-3 py-2 space-y-2">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <Label className="text-xs flex items-center gap-1.5">
+                  <BotOff className="w-3.5 h-3.5" />
+                  Restrict AI
+                </Label>
+                <p className="text-2xs text-muted-foreground">On: AI replies are blocked. Off: AI replies are allowed.</p>
+              </div>
+              <Switch
+                checked={(currentChannel?.isLlmRestricted ?? false) || (currentChannel?.llmParticipationEnabled === false)}
+                disabled={!currentChannel || settingsSaving}
+                onCheckedChange={(checked) =>
+                  saveChannelSettings({
+                    isLlmRestricted: checked,
+                    llmParticipationEnabled: !checked,
+                  })
+                }
+              />
+            </div>
+
+            {settingsError && (
+              <p className="text-2xs text-destructive">{settingsError}</p>
+            )}
+          </div>
 
           {/* Context Tab */}
           <TabsContent value="context" className="flex-1 m-0 overflow-hidden">
@@ -284,63 +307,6 @@ export function InspectorPanel() {
             </ScrollArea>
           </TabsContent>
 
-          {/* Settings Tab */}
-          <TabsContent value="settings" className="flex-1 m-0 overflow-hidden">
-            <ScrollArea className="h-full">
-              <div className="p-4 space-y-6">
-                <p className="text-xs text-muted-foreground">
-                  Configure channel-specific settings.
-                </p>
-
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <div className="space-y-0.5">
-                      <Label className="text-sm">LLM participation</Label>
-                      <p className="text-2xs text-muted-foreground">
-                        Allow the AI to participate in this channel
-                      </p>
-                    </div>
-                    <Switch
-                      checked={currentChannel?.llmParticipationEnabled ?? true}
-                      disabled={!currentChannel || settingsSaving}
-                      onCheckedChange={(checked) =>
-                        saveChannelSettings({ llmParticipationEnabled: checked })
-                      }
-                    />
-                  </div>
-
-                  <div className="flex items-center justify-between">
-                    <div className="space-y-0.5">
-                      <Label className="text-sm flex items-center gap-1.5">
-                        <BotOff className="w-3.5 h-3.5" />
-                        Restricted-LLM
-                      </Label>
-                      <p className="text-2xs text-muted-foreground">
-                        Prevent AI responses in this channel
-                      </p>
-                    </div>
-                    <Switch
-                      checked={currentChannel?.isLlmRestricted ?? false}
-                      disabled={!currentChannel || settingsSaving}
-                      onCheckedChange={(checked) =>
-                        saveChannelSettings({ isLlmRestricted: checked })
-                      }
-                    />
-                  </div>
-
-                  {currentChannel?.isLlmRestricted && (
-                    <p className="text-2xs text-muted-foreground">
-                      Restricted-LLM is on. The AI will not respond in this channel.
-                    </p>
-                  )}
-
-                  {settingsError && (
-                    <p className="text-2xs text-destructive">{settingsError}</p>
-                  )}
-                </div>
-              </div>
-            </ScrollArea>
-          </TabsContent>
         </Tabs>
       </aside>
     </>
