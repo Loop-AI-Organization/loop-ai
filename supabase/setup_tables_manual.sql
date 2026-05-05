@@ -52,6 +52,9 @@ CREATE TABLE IF NOT EXISTS public.channels (
     name text NOT NULL,
     type text NOT NULL DEFAULT 'project' CHECK (type IN ('project', 'dm')),
     created_at timestamptz NOT NULL DEFAULT now(),
+    is_llm_restricted boolean NOT NULL DEFAULT false,
+    llm_participation_enabled boolean NOT NULL DEFAULT true,
+    dm_pair_key text,
     summary text,
     summary_updated_at timestamptz
 );
@@ -130,6 +133,11 @@ CREATE INDEX IF NOT EXISTS idx_actions_thread_id ON public.actions(thread_id);
 CREATE INDEX IF NOT EXISTS idx_actions_status ON public.actions(status);
 CREATE INDEX IF NOT EXISTS idx_workspaces_user_id ON public.workspaces(user_id);
 CREATE INDEX IF NOT EXISTS idx_channels_workspace_id ON public.channels(workspace_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_channels_workspace_dm_pair_key
+    ON public.channels(workspace_id, dm_pair_key)
+    WHERE type = 'dm' AND dm_pair_key IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_channels_llm_participation ON public.channels(llm_participation_enabled);
+CREATE INDEX IF NOT EXISTS idx_channels_llm_restricted ON public.channels(is_llm_restricted);
 CREATE INDEX IF NOT EXISTS idx_threads_workspace_id ON public.threads(workspace_id);
 CREATE INDEX IF NOT EXISTS idx_threads_channel_id ON public.threads(channel_id);
 CREATE INDEX IF NOT EXISTS idx_threads_user_id ON public.threads(user_id);

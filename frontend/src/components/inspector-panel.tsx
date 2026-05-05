@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
-import { X, Clock, Settings2, Brain, File, ListChecks } from 'lucide-react';
+import { X, Clock, Brain, File, ListChecks, FileText, Bookmark, BotOff } from 'lucide-react';
 import { useAppStore } from '@/store/app-store';
-import { fetchWorkspaceFiles, fetchChannelTasks } from '@/lib/supabase-data';
+import { fetchWorkspaceFiles, fetchChannelTasks, updateChannelSettings } from '@/lib/supabase-data';
 import { getSupabase } from '@/lib/supabase';
 import type { Action, FileRecord, Task } from '@/types';
 import { FileCard } from '@/components/file-card';
@@ -19,19 +19,41 @@ export function InspectorPanel() {
     isInspectorOpen,
     toggleInspector,
     actions,
+    channels,
     currentChannelId,
     currentWorkspaceId,
     contextItems,
-    threadSettings,
-    updateThreadSettings,
+    setChannels,
     tasks,
     setTasks,
     upsertTask,
     removeTask,
   } = useAppStore();
   const [workspaceFiles, setWorkspaceFiles] = useState<FileRecord[]>([]);
+  const [settingsSaving, setSettingsSaving] = useState(false);
+  const [settingsError, setSettingsError] = useState<string | null>(null);
 
   const threadActions = currentChannelId ? actions : [];
+  const currentChannel = channels.find((channel) => channel.id === currentChannelId) ?? null;
+
+  async function saveChannelSettings(
+    settings: { isLlmRestricted?: boolean; llmParticipationEnabled?: boolean }
+  ) {
+    if (!currentChannel) return;
+    setSettingsSaving(true);
+    setSettingsError(null);
+    try {
+      const updated = await updateChannelSettings(currentChannel.id, settings);
+      setChannels(channels.map((channel) => (
+        channel.id === updated.id ? { ...channel, ...updated } : channel
+      )));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to update channel settings';
+      setSettingsError(message);
+    } finally {
+      setSettingsSaving(false);
+    }
+  }
 
   useEffect(() => {
     if (!currentWorkspaceId) {
@@ -160,11 +182,34 @@ export function InspectorPanel() {
               <File className="w-3.5 h-3.5 mr-1.5" />
               Files
             </TabsTrigger>
-            <TabsTrigger value="settings" className="text-xs data-[state=active]:bg-muted">
-              <Settings2 className="w-3.5 h-3.5 mr-1.5" />
-              Settings
-            </TabsTrigger>
           </TabsList>
+
+          {/* Always-visible AI controls */}
+          <div className="border-b border-border px-3 py-2 space-y-2">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <Label className="text-xs flex items-center gap-1.5">
+                  <BotOff className="w-3.5 h-3.5" />
+                  Restrict AI
+                </Label>
+                <p className="text-2xs text-muted-foreground">On: AI replies are blocked. Off: AI replies are allowed.</p>
+              </div>
+              <Switch
+                checked={(currentChannel?.isLlmRestricted ?? false) || (currentChannel?.llmParticipationEnabled === false)}
+                disabled={!currentChannel || settingsSaving}
+                onCheckedChange={(checked) =>
+                  saveChannelSettings({
+                    isLlmRestricted: checked,
+                    llmParticipationEnabled: !checked,
+                  })
+                }
+              />
+            </div>
+
+            {settingsError && (
+              <p className="text-2xs text-destructive">{settingsError}</p>
+            )}
+          </div>
 
           {/* Context Tab */}
           <TabsContent value="context" className="flex-1 m-0 overflow-hidden">
@@ -262,48 +307,6 @@ export function InspectorPanel() {
             </ScrollArea>
           </TabsContent>
 
-          {/* Settings Tab */}
-          <TabsContent value="settings" className="flex-1 m-0 overflow-hidden">
-            <ScrollArea className="h-full">
-              <div className="p-4 space-y-6">
-                <p className="text-xs text-muted-foreground">
-                  Configure channel-specific settings.
-                </p>
-
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <div className="space-y-0.5">
-                      <Label className="text-sm">Mention-only mode</Label>
-                      <p className="text-2xs text-muted-foreground">
-                        Only respond when @mentioned
-                      </p>
-                    </div>
-                    <Switch 
-                      checked={threadSettings.mentionOnlyMode}
-                      onCheckedChange={(checked) => 
-                        updateThreadSettings({ mentionOnlyMode: checked })
-                      }
-                    />
-                  </div>
-
-                  <div className="flex items-center justify-between">
-                    <div className="space-y-0.5">
-                      <Label className="text-sm">Respond only if unanswered</Label>
-                      <p className="text-2xs text-muted-foreground">
-                        Skip if a human already replied
-                      </p>
-                    </div>
-                    <Switch 
-                      checked={threadSettings.respondOnlyIfUnanswered}
-                      onCheckedChange={(checked) => 
-                        updateThreadSettings({ respondOnlyIfUnanswered: checked })
-                      }
-                    />
-                  </div>
-                </div>
-              </div>
-            </ScrollArea>
-          </TabsContent>
         </Tabs>
       </aside>
     </>

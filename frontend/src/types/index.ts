@@ -20,6 +20,8 @@ export interface Channel {
   workspaceId: string;
   name: string;
   type: 'project' | 'dm';
+  isLlmRestricted: boolean;
+  llmParticipationEnabled: boolean;
   unreadCount: number;
   lastMessage?: string;
   avatar?: string;

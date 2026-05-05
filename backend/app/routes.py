@@ -69,6 +69,20 @@ class FileUploadRequest(BaseModel):
     file_size: int = 0
 
 
+class CreateDmRequest(BaseModel):
+    other_user_id: str
+
+
+class ChannelSettingsRequest(BaseModel):
+    is_llm_restricted: Optional[bool] = None
+    llm_participation_enabled: Optional[bool] = None
+
+
+class CreateChannelRequest(BaseModel):
+    name: str
+    type: str = "project"
+
+
 @router.get("/health")
 async def health():
     return {"ok": True}
@@ -210,6 +224,48 @@ def _create_unique_share_code() -> str:
         if not res.data:
             return code
     raise HTTPException(status_code=500, detail="Failed to generate unique workspace share code")
+
+
+def _user_can_access_workspace(workspace_id: str, user_id: str) -> bool:
+    ws = (
+        supabase.table("workspaces")
+        .select("id, user_id, owner_id")
+        .eq("id", workspace_id)
+        .limit(1)
+        .execute()
+    )
+    if ws.data and (
+        ws.data[0].get("user_id") == user_id
+        or ws.data[0].get("owner_id") == user_id
+    ):
+        return True
+    member = (
+        supabase.table("workspace_members")
+        .select("user_id")
+        .eq("workspace_id", workspace_id)
+        .eq("user_id", user_id)
+        .limit(1)
+        .execute()
+    )
+    return bool(member.data)
+
+
+def _dm_pair_key(user_a: str, user_b: str) -> str:
+    return ":".join(sorted([user_a, user_b]))
+
+
+def _select_channel_by_id(channel_id: str) -> Optional[dict]:
+    res = (
+        supabase.table("channels")
+        .select(
+            "id, workspace_id, name, type, created_at, summary, summary_updated_at, "
+            "is_llm_restricted, llm_participation_enabled, dm_pair_key"
+        )
+        .eq("id", channel_id)
+        .limit(1)
+        .execute()
+    )
+    return res.data[0] if res.data else None
 
 
 @router.post("/api/workspaces/{workspace_id}/members/invite")
@@ -522,6 +578,164 @@ async def get_workspace_members_with_profiles(
             )
         )
     return profiles
+
+
+@router.post("/api/workspaces/{workspace_id}/dms")
+async def create_or_get_dm(
+    workspace_id: str,
+    body: CreateDmRequest,
+    user: Annotated[dict, Depends(get_current_user)],
+):
+    uid = user.get("sub")
+    if not uid:
+        raise HTTPException(status_code=401, detail="Invalid user")
+
+    other_user_id = (body.other_user_id or "").strip()
+    if not other_user_id:
+        raise HTTPException(status_code=400, detail="other_user_id required")
+    if other_user_id == uid:
+        raise HTTPException(status_code=400, detail="Cannot create a DM with yourself")
+
+    if not _user_can_access_workspace(workspace_id, uid):
+        raise HTTPException(status_code=403, detail="Not a member of this workspace")
+    if not _user_can_access_workspace(workspace_id, other_user_id):
+        raise HTTPException(status_code=403, detail="Recipient is not a member of this workspace")
+
+    pair_key = _dm_pair_key(uid, other_user_id)
+    existing = (
+        supabase.table("channels")
+        .select(
+            "id, workspace_id, name, type, created_at, summary, summary_updated_at, "
+            "is_llm_restricted, llm_participation_enabled, dm_pair_key"
+        )
+        .eq("workspace_id", workspace_id)
+        .eq("type", "dm")
+        .eq("dm_pair_key", pair_key)
+        .limit(1)
+        .execute()
+    )
+    if existing.data:
+        return existing.data[0]
+
+    try:
+        created = supabase.table("channels").insert(
+            {
+                "workspace_id": workspace_id,
+                "name": "DM",
+                "type": "dm",
+                "dm_pair_key": pair_key,
+                "is_llm_restricted": False,
+                "llm_participation_enabled": True,
+            }
+        ).execute()
+        created_id = None
+        if created.data and len(created.data) > 0:
+            created_id = created.data[0].get("id")
+
+        channel = _select_channel_by_id(created_id) if created_id else None
+        if not channel:
+            lookup = (
+                supabase.table("channels")
+                .select(
+                    "id, workspace_id, name, type, created_at, summary, summary_updated_at, "
+                    "is_llm_restricted, llm_participation_enabled, dm_pair_key"
+                )
+                .eq("workspace_id", workspace_id)
+                .eq("type", "dm")
+                .eq("dm_pair_key", pair_key)
+                .limit(1)
+                .execute()
+            )
+            if lookup.data:
+                channel = lookup.data[0]
+        if not channel:
+            raise HTTPException(status_code=500, detail="Failed to create DM")
+
+        supabase.table("channel_members").insert(
+            [
+                {"channel_id": channel["id"], "user_id": uid},
+                {"channel_id": channel["id"], "user_id": other_user_id},
+            ]
+        ).execute()
+        return channel
+    except HTTPException:
+        raise
+    except Exception:
+        retry = (
+            supabase.table("channels")
+            .select(
+                "id, workspace_id, name, type, created_at, summary, summary_updated_at, "
+                "is_llm_restricted, llm_participation_enabled, dm_pair_key"
+            )
+            .eq("workspace_id", workspace_id)
+            .eq("type", "dm")
+            .eq("dm_pair_key", pair_key)
+            .limit(1)
+            .execute()
+        )
+        if retry.data:
+            return retry.data[0]
+        raise HTTPException(status_code=500, detail="Failed to create DM")
+
+
+@router.post("/api/workspaces/{workspace_id}/channels")
+async def create_workspace_channel(
+    workspace_id: str,
+    body: CreateChannelRequest,
+    user: Annotated[dict, Depends(get_current_user)],
+):
+    uid = user.get("sub")
+    if not uid:
+        raise HTTPException(status_code=401, detail="Invalid user")
+    if not _user_can_access_workspace(workspace_id, uid):
+        raise HTTPException(status_code=403, detail="Not a member of this workspace")
+
+    name = (body.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Channel name is required")
+
+    ch_type = (body.type or "project").strip().lower()
+    if ch_type not in ("project", "dm"):
+        raise HTTPException(status_code=400, detail="Invalid channel type")
+
+    row: dict = {
+        "workspace_id": workspace_id,
+        "name": name,
+        "type": ch_type,
+    }
+    if ch_type == "dm":
+        raise HTTPException(status_code=400, detail="Use the DM endpoint for direct messages")
+
+    try:
+        created = supabase.table("channels").insert(row).execute()
+        created_id = None
+        if created.data and len(created.data) > 0:
+            created_id = created.data[0].get("id")
+        if created_id:
+            channel = _select_channel_by_id(created_id)
+            if channel:
+                return channel
+
+        fallback = (
+            supabase.table("channels")
+            .select(
+                "id, workspace_id, name, type, created_at, summary, summary_updated_at, "
+                "is_llm_restricted, llm_participation_enabled, dm_pair_key"
+            )
+            .eq("workspace_id", workspace_id)
+            .eq("type", ch_type)
+            .eq("name", name)
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        if fallback.data:
+            return fallback.data[0]
+        raise HTTPException(status_code=500, detail="Failed to create channel")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to create channel: {e!s}")
 
 
 @router.post("/api/workspaces/{workspace_id}/members/remove")
@@ -880,7 +1094,10 @@ def _get_user_channels(uid: str) -> list[dict]:
 
     channels_res = (
         supabase.table("channels")
-        .select("id, workspace_id, name, type, summary")
+        .select(
+            "id, workspace_id, name, type, summary, "
+            "is_llm_restricted, llm_participation_enabled"
+        )
         .in_("workspace_id", list(workspace_map.keys()))
         .execute()
     )
@@ -892,6 +1109,8 @@ def _get_user_channels(uid: str) -> list[dict]:
             "workspace_id": ch["workspace_id"],
             "name": ch["name"],
             "type": ch.get("type", "project"),
+            "is_llm_restricted": ch.get("is_llm_restricted", False),
+            "llm_participation_enabled": ch.get("llm_participation_enabled", True),
             "workspace_name": ws.get("name", ""),
             "summary": ch.get("summary") or f"Channel #{ch['name']} in workspace {ws.get('name', '')}",
         })
@@ -925,22 +1144,91 @@ def _get_or_create_channel_thread(channel_id: str) -> str:
         raise HTTPException(status_code=404, detail="Channel not found")
     workspace_id = ch.data[0].get("workspace_id")
 
-    created = (
+    created = supabase.table("threads").insert(
+        {
+            "workspace_id": workspace_id,
+            "channel_id": channel_id,
+            "title": "Channel conversation",
+        }
+    ).execute()
+    created_id = None
+    if created.data and len(created.data) > 0:
+        created_id = created.data[0].get("id")
+    if created_id:
+        return created_id
+
+    # Fallback lookup for clients that don't return inserted rows by default
+    retry = (
         supabase.table("threads")
-        .insert(
-            {
-                "workspace_id": workspace_id,
-                "channel_id": channel_id,
-                "title": "Channel conversation",
-            }
-        )
         .select("id")
-        .single()
+        .eq("channel_id", channel_id)
+        .order("updated_at", desc=True)
+        .limit(1)
         .execute()
     )
-    if not created.data or not created.data.get("id"):
-        raise HTTPException(status_code=500, detail="Failed to initialize channel conversation")
-    return created.data["id"]
+    if retry.data and len(retry.data) > 0 and retry.data[0].get("id"):
+        return retry.data[0]["id"]
+    raise HTTPException(status_code=500, detail="Failed to initialize channel conversation")
+
+
+@router.patch("/api/channels/{channel_id}/settings")
+async def update_channel_settings(
+    channel_id: str,
+    body: ChannelSettingsRequest,
+    user: Annotated[dict, Depends(get_current_user)],
+):
+    uid = user.get("sub")
+    if not uid:
+        raise HTTPException(status_code=401, detail="Invalid user")
+
+    channel = _select_channel_by_id(channel_id)
+    if not channel:
+        raise HTTPException(status_code=404, detail="Channel not found")
+    if not _user_can_access_workspace(channel["workspace_id"], uid):
+        raise HTTPException(status_code=403, detail="Not a member of this workspace")
+
+    updates: dict[str, bool] = {}
+    if body.is_llm_restricted is not None:
+        updates["is_llm_restricted"] = body.is_llm_restricted
+    if body.llm_participation_enabled is not None:
+        updates["llm_participation_enabled"] = body.llm_participation_enabled
+
+    if not updates:
+        return channel
+
+    try:
+        supabase.table("channels").update(updates).eq("id", channel_id).execute()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to update channel settings: {e!s}")
+
+    updated = _select_channel_by_id(channel_id)
+    if not updated:
+        raise HTTPException(status_code=500, detail="Failed to reload channel settings")
+    return updated
+
+
+@router.post("/api/channels/{channel_id}/summary/refresh")
+async def enqueue_channel_summary_refresh(
+    channel_id: str,
+    user: Annotated[dict, Depends(get_current_user)],
+):
+    uid = user.get("sub")
+    if not uid:
+        raise HTTPException(status_code=401, detail="Invalid user")
+
+    channel = _select_channel_by_id(channel_id)
+    if not channel:
+        raise HTTPException(status_code=404, detail="Channel not found")
+    if not _user_can_access_workspace(channel["workspace_id"], uid):
+        raise HTTPException(status_code=403, detail="Not a member of this workspace")
+
+    try:
+        enqueue_action(channel_id, "generate_summary", action_id=None)
+    except Exception as exc:
+        logger.warning("summary enqueue failed channel_id=%s error=%s", channel_id, exc)
+        return {"ok": False, "queued": False}
+
+    return {"ok": True, "queued": True}
 
 
 @router.post("/api/channels/{channel_id}/triage")
@@ -967,6 +1255,14 @@ async def respond_to_ai_mention(
 
     # Resolve thread_id once — use what the client sent or look it up
     thread_id = body.thread_id or _get_or_create_channel_thread(channel_id)
+
+    channel = _select_channel_by_id(channel_id)
+    if not channel:
+        return {"should_respond": False, "reason": "channel settings unavailable"}
+    if channel.get("is_llm_restricted") is True:
+        return {"should_respond": False, "reason": "channel is restricted-llm"}
+    if channel.get("llm_participation_enabled") is False:
+        return {"should_respond": False, "reason": "llm participation disabled"}
 
     logger.info(
         "triage start channel_id=%s thread_id=%s uid=%s message_count=%s",
@@ -1802,4 +2098,3 @@ def _maybe_enqueue_summary(channel_id: str) -> None:
         enqueue_action(channel_id, "generate_summary", action_id=None)
     except Exception:
         pass
-
