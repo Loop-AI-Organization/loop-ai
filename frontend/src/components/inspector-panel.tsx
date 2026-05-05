@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
-import { X, Clock, Settings2, Brain, File, ListChecks } from 'lucide-react';
+import { X, Clock, Settings2, Brain, File, ListChecks, FileText, Bookmark, BotOff } from 'lucide-react';
 import { useAppStore } from '@/store/app-store';
-import { fetchWorkspaceFiles, fetchChannelTasks } from '@/lib/supabase-data';
+import { fetchWorkspaceFiles, fetchChannelTasks, updateChannelSettings } from '@/lib/supabase-data';
 import { getSupabase } from '@/lib/supabase';
 import type { Action, FileRecord, Task } from '@/types';
 import { FileCard } from '@/components/file-card';
@@ -19,19 +19,41 @@ export function InspectorPanel() {
     isInspectorOpen,
     toggleInspector,
     actions,
+    channels,
     currentChannelId,
     currentWorkspaceId,
     contextItems,
-    threadSettings,
-    updateThreadSettings,
+    setChannels,
     tasks,
     setTasks,
     upsertTask,
     removeTask,
   } = useAppStore();
   const [workspaceFiles, setWorkspaceFiles] = useState<FileRecord[]>([]);
+  const [settingsSaving, setSettingsSaving] = useState(false);
+  const [settingsError, setSettingsError] = useState<string | null>(null);
 
   const threadActions = currentChannelId ? actions : [];
+  const currentChannel = channels.find((channel) => channel.id === currentChannelId) ?? null;
+
+  async function saveChannelSettings(
+    settings: { isLlmRestricted?: boolean; llmParticipationEnabled?: boolean }
+  ) {
+    if (!currentChannel) return;
+    setSettingsSaving(true);
+    setSettingsError(null);
+    try {
+      const updated = await updateChannelSettings(currentChannel.id, settings);
+      setChannels(channels.map((channel) => (
+        channel.id === updated.id ? { ...channel, ...updated } : channel
+      )));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to update channel settings';
+      setSettingsError(message);
+    } finally {
+      setSettingsSaving(false);
+    }
+  }
 
   useEffect(() => {
     if (!currentWorkspaceId) {
@@ -273,33 +295,48 @@ export function InspectorPanel() {
                 <div className="space-y-4">
                   <div className="flex items-center justify-between">
                     <div className="space-y-0.5">
-                      <Label className="text-sm">Mention-only mode</Label>
+                      <Label className="text-sm">LLM participation</Label>
                       <p className="text-2xs text-muted-foreground">
-                        Only respond when @mentioned
+                        Allow the AI to participate in this channel
                       </p>
                     </div>
-                    <Switch 
-                      checked={threadSettings.mentionOnlyMode}
-                      onCheckedChange={(checked) => 
-                        updateThreadSettings({ mentionOnlyMode: checked })
+                    <Switch
+                      checked={currentChannel?.llmParticipationEnabled ?? true}
+                      disabled={!currentChannel || settingsSaving}
+                      onCheckedChange={(checked) =>
+                        saveChannelSettings({ llmParticipationEnabled: checked })
                       }
                     />
                   </div>
 
                   <div className="flex items-center justify-between">
                     <div className="space-y-0.5">
-                      <Label className="text-sm">Respond only if unanswered</Label>
+                      <Label className="text-sm flex items-center gap-1.5">
+                        <BotOff className="w-3.5 h-3.5" />
+                        Restricted-LLM
+                      </Label>
                       <p className="text-2xs text-muted-foreground">
-                        Skip if a human already replied
+                        Prevent AI responses in this channel
                       </p>
                     </div>
-                    <Switch 
-                      checked={threadSettings.respondOnlyIfUnanswered}
-                      onCheckedChange={(checked) => 
-                        updateThreadSettings({ respondOnlyIfUnanswered: checked })
+                    <Switch
+                      checked={currentChannel?.isLlmRestricted ?? false}
+                      disabled={!currentChannel || settingsSaving}
+                      onCheckedChange={(checked) =>
+                        saveChannelSettings({ isLlmRestricted: checked })
                       }
                     />
                   </div>
+
+                  {currentChannel?.isLlmRestricted && (
+                    <p className="text-2xs text-muted-foreground">
+                      Restricted-LLM is on. The AI will not respond in this channel.
+                    </p>
+                  )}
+
+                  {settingsError && (
+                    <p className="text-2xs text-destructive">{settingsError}</p>
+                  )}
                 </div>
               </div>
             </ScrollArea>

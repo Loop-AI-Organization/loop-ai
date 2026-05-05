@@ -31,6 +31,8 @@ interface ChannelRow {
   workspace_id: string;
   name: string;
   type: 'project' | 'dm';
+  is_llm_restricted: boolean;
+  llm_participation_enabled: boolean;
   created_at: string;
 }
 
@@ -63,6 +65,8 @@ function toChannel(r: ChannelRow): Channel {
     workspaceId: r.workspace_id,
     name: r.name,
     type: r.type,
+    isLlmRestricted: r.is_llm_restricted ?? false,
+    llmParticipationEnabled: r.llm_participation_enabled ?? true,
     unreadCount: 0,
     lastMessage: undefined,
   };
@@ -176,7 +180,7 @@ export async function fetchChannels(workspaceId: string): Promise<Channel[]> {
   const supabase = getSupabase();
   const { data, error } = await supabase
     .from('channels')
-    .select('id, workspace_id, name, type, created_at')
+    .select('id, workspace_id, name, type, is_llm_restricted, llm_participation_enabled, created_at')
     .eq('workspace_id', workspaceId)
     .order('created_at', { ascending: true });
   if (error) throw error;
@@ -373,7 +377,7 @@ export async function findExistingDm(workspaceId: string, otherUserId: string): 
   if (myChannelIds.length === 0) return null;
   const { data: channels } = await supabase
     .from('channels')
-    .select('id, workspace_id, name, type, created_at')
+    .select('id, workspace_id, name, type, is_llm_restricted, llm_participation_enabled, created_at')
     .eq('workspace_id', workspaceId)
     .eq('type', 'dm')
     .in('id', myChannelIds);
@@ -392,23 +396,17 @@ export async function findExistingDm(workspaceId: string, otherUserId: string): 
 
 /** Create a DM channel with the other user and add both to channel_members. */
 export async function createDmChannel(workspaceId: string, otherUserId: string): Promise<Channel> {
-  const supabase = getSupabase();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('Not authenticated');
-  const existing = await findExistingDm(workspaceId, otherUserId);
-  if (existing) return existing;
-  const { data: ch, error: chError } = await supabase
-    .from('channels')
-    .insert({ workspace_id: workspaceId, name: 'DM', type: 'dm' })
-    .select('id, workspace_id, name, type, created_at')
-    .single();
-  if (chError) throw chError;
-  const channel = toChannel(ch as ChannelRow);
-  await supabase.from('channel_members').insert([
-    { channel_id: channel.id, user_id: user.id },
-    { channel_id: channel.id, user_id: otherUserId },
-  ]);
-  return channel;
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${API_URL}/api/workspaces/${workspaceId}/dms`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ other_user_id: otherUserId }),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(body.detail ?? body.message ?? `Failed to create DM (${res.status})`);
+  }
+  return toChannel(body as ChannelRow);
 }
 
 export async function createChannel(workspaceId: string, name: string, type: 'project' | 'dm' = 'project'): Promise<Channel> {
@@ -416,7 +414,7 @@ export async function createChannel(workspaceId: string, name: string, type: 'pr
   const { data, error } = await supabase
     .from('channels')
     .insert({ workspace_id: workspaceId, name, type })
-    .select('id, workspace_id, name, type, created_at')
+    .select('id, workspace_id, name, type, is_llm_restricted, llm_participation_enabled, created_at')
     .single();
   if (error) throw error;
   return toChannel(data as ChannelRow);
@@ -519,10 +517,48 @@ export async function updateChannel(channelId: string, name: string): Promise<Ch
     .from('channels')
     .update({ name })
     .eq('id', channelId)
-    .select('id, workspace_id, name, type, created_at')
+    .select('id, workspace_id, name, type, is_llm_restricted, llm_participation_enabled, created_at')
     .single();
   if (error) throw error;
   return toChannel(data as ChannelRow);
+}
+
+export async function updateChannelSettings(
+  channelId: string,
+  settings: { isLlmRestricted?: boolean; llmParticipationEnabled?: boolean }
+): Promise<Channel> {
+  const headers = await getAuthHeaders();
+  const payload: Record<string, boolean> = {};
+  if (settings.isLlmRestricted !== undefined) payload.is_llm_restricted = settings.isLlmRestricted;
+  if (settings.llmParticipationEnabled !== undefined) {
+    payload.llm_participation_enabled = settings.llmParticipationEnabled;
+  }
+  const res = await fetch(`${API_URL}/api/channels/${channelId}/settings`, {
+    method: 'PATCH',
+    headers,
+    body: JSON.stringify(payload),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(body.detail ?? body.message ?? `Failed to update channel settings (${res.status})`);
+  }
+  return toChannel(body as ChannelRow);
+}
+
+export async function refreshChannelSummary(channelId: string): Promise<{ ok: boolean; queued: boolean }> {
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${API_URL}/api/channels/${channelId}/summary/refresh`, {
+    method: 'POST',
+    headers,
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(body.detail ?? body.message ?? `Failed to refresh channel summary (${res.status})`);
+  }
+  return {
+    ok: body.ok === true,
+    queued: body.queued === true,
+  };
 }
 
 export async function deleteChannel(channelId: string): Promise<void> {
@@ -554,6 +590,9 @@ export async function insertMessage(channelId: string, role: Message['role'], co
     .select('id, thread_id, role, content, user_id, user_display_name, created_at')
     .single();
   if (error) throw error;
+  if (role === 'user') {
+    refreshChannelSummary(channelId).catch(() => undefined);
+  }
   return toMessage(data as MessageRow);
 }
 

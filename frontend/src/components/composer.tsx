@@ -32,12 +32,16 @@ export function Composer() {
   const {
     currentWorkspaceId,
     currentChannelId,
+    channels,
     orchestratorStatus,
     addMessage,
     setOrchestratorStatus,
     pendingSubmit,
     setPendingSubmit,
   } = useAppStore();
+  const currentChannel = channels.find((channel) => channel.id === currentChannelId) ?? null;
+  const aiResponsesDisabled =
+    currentChannel?.isLlmRestricted === true || currentChannel?.llmParticipationEnabled === false;
 
   // Auto-submit when a ClarifyCard option is selected
   useEffect(() => {
@@ -77,8 +81,8 @@ export function Composer() {
 
     setValue('');
 
-    // If user didn't @ai, just send the message — no AI response
-    if (!mentionsAi) {
+    // Skip AI triage for normal messages or channels that disable AI participation.
+    if (!mentionsAi || aiResponsesDisabled) {
       return;
     }
 
@@ -163,7 +167,7 @@ export function Composer() {
     }
   };
 
-  const showsAiHint = hasAiMention(value);
+  const showsAiHint = hasAiMention(value) && !aiResponsesDisabled;
 
   const statusConfig = {
     ready: { label: 'Ready', color: 'text-accent-success' },
@@ -251,7 +255,11 @@ export function Composer() {
           </span>
           <span className="hidden sm:flex items-center gap-1.5 text-muted-foreground/60">
             <Bot className="w-3 h-3" />
-            <span>type <strong>@ai</strong> to get AI response</span>
+            {aiResponsesDisabled ? (
+              <span>AI responses are disabled in this channel</span>
+            ) : (
+              <span>type <strong>@ai</strong> to get AI response</span>
+            )}
           </span>
         </div>
 

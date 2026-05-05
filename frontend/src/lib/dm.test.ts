@@ -28,11 +28,14 @@ describe('dm helpers', () => {
       workspaceId: 'ws-1',
       name: 'DM',
       type: 'dm',
+      isLlmRestricted: false,
+      llmParticipationEnabled: true,
       unreadCount: 0,
     });
 
     const channel = await launchDirectMessage('ws-1', 'other-user-id');
 
+    expect(createDmChannel).toHaveBeenCalledWith('ws-1', 'other-user-id');
     expect(channel.id).toBe('dm-1');
     expect(useAppStore.getState().channels).toHaveLength(1);
     expect(useAppStore.getState().channels[0]?.id).toBe('dm-1');
@@ -46,6 +49,8 @@ describe('dm helpers', () => {
           workspaceId: 'ws-1',
           name: 'DM',
           type: 'dm',
+          isLlmRestricted: false,
+          llmParticipationEnabled: true,
           unreadCount: 0,
         },
       ],
@@ -56,12 +61,33 @@ describe('dm helpers', () => {
       workspaceId: 'ws-1',
       name: 'DM',
       type: 'dm',
+      isLlmRestricted: false,
+      llmParticipationEnabled: true,
       unreadCount: 0,
     });
 
     await launchDirectMessage('ws-1', 'other-user-id');
 
     expect(useAppStore.getState().channels).toHaveLength(1);
+  });
+
+  it('keeps a single channel entry across repeated backend-backed launches', async () => {
+    vi.mocked(createDmChannel).mockResolvedValue({
+      id: 'dm-1',
+      workspaceId: 'ws-1',
+      name: 'DM',
+      type: 'dm',
+      isLlmRestricted: false,
+      llmParticipationEnabled: true,
+      unreadCount: 0,
+    });
+
+    await launchDirectMessage('ws-1', 'other-user-id');
+    await launchDirectMessage('ws-1', 'other-user-id');
+
+    expect(createDmChannel).toHaveBeenCalledTimes(2);
+    expect(useAppStore.getState().channels).toHaveLength(1);
+    expect(useAppStore.getState().channels[0]?.id).toBe('dm-1');
   });
 
   it('returns DM candidates excluding current user', async () => {
