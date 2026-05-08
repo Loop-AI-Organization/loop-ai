@@ -707,15 +707,61 @@ def find_matching_task(*, reference: str, tasks: List[Dict]) -> Optional[str]:
         return None
 
 
-_TASK_EXPORT_PROMPT = """\
-You are a document generator. Given a list of tasks, create a well-structured markdown task list.
+_TASK_EXPORT_STATUS_ORDER = ["open", "in_progress", "blocked", "done"]
+_TASK_EXPORT_STATUS_LABELS = {
+    "open": "Open",
+    "in_progress": "In Progress",
+    "blocked": "Blocked",
+    "done": "Done",
+}
 
-Title: {title}
 
-Format each task as a checklist item with status, assignees, and due date where available.
-Use sections to group tasks by status (Open, In Progress, Done, Blocked).
-Do NOT include preamble — write the document content directly.\
-"""
+def _format_task_due_date(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+    return str(value)[:10]
+
+
+def _format_task_assignees(task: Dict) -> List[str]:
+    names: List[str] = []
+    for assignee in task.get("task_assignees") or []:
+        name = (assignee.get("display_name") or "").strip()
+        if name:
+            names.append(name)
+    return names
+
+
+def format_task_export_markdown(*, title: str, tasks: List[Dict]) -> str:
+    confirmed = [
+        task for task in tasks
+        if task.get("status") in _TASK_EXPORT_STATUS_ORDER
+    ]
+    if not confirmed:
+        return ""
+
+    lines = [f"# {title.strip() or 'Task List'}"]
+    for status in _TASK_EXPORT_STATUS_ORDER:
+        group = [task for task in confirmed if task.get("status") == status]
+        if not group:
+            continue
+        lines.extend(["", f"## {_TASK_EXPORT_STATUS_LABELS[status]}", ""])
+        for task in group:
+            checkbox = "x" if status == "done" else " "
+            metadata: List[str] = []
+            assignees = _format_task_assignees(task)
+            if assignees:
+                metadata.append(f"Assignees: {', '.join(assignees)}")
+            due_date = _format_task_due_date(task.get("due_date"))
+            if due_date:
+                metadata.append(f"Due: {due_date}")
+            suffix = f" ({'; '.join(metadata)})" if metadata else ""
+            title_text = str(task.get("title") or "Untitled task").strip() or "Untitled task"
+            lines.append(f"- [{checkbox}] {title_text}{suffix}")
+            description = (task.get("description") or "").strip()
+            if description:
+                lines.append(f"  - {description}")
+
+    return "\n".join(lines).strip() + "\n"
 
 
 def export_tasks_as_document(
@@ -732,8 +778,6 @@ def export_tasks_as_document(
     from app.supabase_client import supabase
     import uuid as _uuid
 
-    settings = load_settings()
-
     tasks_res = (
         supabase.table("tasks")
         .select("*, task_assignees(display_name)")
@@ -746,29 +790,7 @@ def export_tasks_as_document(
     if not tasks:
         return None
 
-    # Build structured task list for the LLM
-    task_lines = []
-    for t in tasks:
-        assignees = ", ".join(a["display_name"] for a in (t.get("task_assignees") or []))
-        due = f" · due {t['due_date'][:10]}" if t.get("due_date") else ""
-        assignee_str = f" · {assignees}" if assignees else ""
-        task_lines.append(f"- [{t['status']}] {t['title']}{assignee_str}{due}")
-        if t.get("description"):
-            task_lines.append(f"  {t['description']}")
-    task_text = "\n".join(task_lines)
-
-    prompt = _TASK_EXPORT_PROMPT.format(title=title)
-    doc_content = chat_completion(
-        settings=settings,
-        messages=[
-            {"role": "system", "content": prompt},
-            {"role": "user", "content": f"Tasks:\n\n{task_text}"},
-        ],
-        model=settings.openrouter_response_model,
-        max_tokens=2048,
-        temperature=0.2,
-    ).strip()
-
+    doc_content = format_task_export_markdown(title=title, tasks=tasks)
     if not doc_content:
         return None
 
