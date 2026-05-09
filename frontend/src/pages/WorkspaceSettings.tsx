@@ -35,7 +35,7 @@ export default function WorkspaceSettings() {
   const [dmError, setDmError] = useState<string | null>(null);
   const [startingDmUserId, setStartingDmUserId] = useState<string | null>(null);
 
-  const { workspaces, user, currentChannelId, channels, setWorkspaces } = useAppStore();
+  const { workspaces, user, currentChannelId, channels, setWorkspaces, dataLoading } = useAppStore();
   const workspace = workspaces.find((w) => w.id === workspaceId);
   const isOwner = workspace && user && workspace.ownerId === user.id;
 
@@ -116,10 +116,10 @@ export default function WorkspaceSettings() {
     return () => { cancelled = true; };
   }, [workspaceId]);
 
-  // Redirect if workspace doesn't exist.
+  // Redirect if workspace is invalid after bootstrap completes.
   useEffect(() => {
-    if (!workspace && workspaces.length > 0) navigate('/app');
-  }, [workspace, workspaces.length, navigate]);
+    if (!dataLoading && !workspace) navigate('/app', { replace: true });
+  }, [workspace, dataLoading, navigate]);
 
   // ── Handlers ──────────────────────────────────────────────────────────────
 
@@ -227,7 +227,21 @@ export default function WorkspaceSettings() {
     }
   };
 
-  if (!workspace) return null;
+  if (!workspace) {
+    if (dataLoading) {
+      return (
+        <div className="min-h-screen bg-background flex items-center justify-center">
+          <p className="text-sm text-muted-foreground">Loading workspace settings…</p>
+        </div>
+      );
+    }
+
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <p className="text-sm text-muted-foreground">Redirecting to your workspace…</p>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background">

@@ -3,6 +3,9 @@ import { useEffect } from 'react';
 import { useAppStore } from '@/store/app-store';
 import { AppShell } from '@/components/app-shell';
 import { fetchChannels, fetchMessages } from '@/lib/supabase-data';
+import type { Message } from '@/types';
+
+const channelMessageCache = new Map<string, Message[]>();
 
 /**
  * URL-driven data loader.
@@ -46,11 +49,16 @@ export default function WorkspaceChannel() {
       return;
     }
 
-    // Immediately commit the navigation to the store and clear stale messages.
+    const previousState = useAppStore.getState();
+    const hasCurrentMessagesForTarget =
+      previousState.currentChannelId === channelId && previousState.messages.length > 0;
+
+    // Immediately commit navigation to the store. Keep current messages when they
+    // already belong to the target channel to avoid visible flicker on fast nav.
     useAppStore.setState({
       currentWorkspaceId: workspaceId,
       currentChannelId: channelId,
-      messages: [],
+      messages: hasCurrentMessagesForTarget ? previousState.messages : [],
     });
     // Mark as read right away.
     useAppStore.getState().markChannelAsRead(channelId);
@@ -94,10 +102,19 @@ export default function WorkspaceChannel() {
       }
 
       // ── 3. Load messages for the channel ────────────────────────────────
+      const cachedMessages = channelMessageCache.get(channelId);
+      if (cachedMessages) {
+        if (useAppStore.getState().currentChannelId === channelId) {
+          useAppStore.setState({ messages: cachedMessages });
+        }
+        return;
+      }
+
       const msgs = await fetchMessages(channelId!);
       if (cancelled) return;
       // Only apply if the user hasn't navigated away while we were fetching.
       if (useAppStore.getState().currentChannelId === channelId) {
+        channelMessageCache.set(channelId, msgs);
         useAppStore.setState({ messages: msgs });
       }
     }

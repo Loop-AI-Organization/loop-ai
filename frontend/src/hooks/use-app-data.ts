@@ -9,6 +9,8 @@ import {
 } from '@/lib/supabase-data';
 import type { User } from '@/types';
 
+let bootstrapPromise: Promise<void> | null = null;
+
 function authUserToUser(
   user: { id: string; email?: string; user_metadata?: { full_name?: string } } | null
 ): User | null {
@@ -47,76 +49,79 @@ export function useAppData() {
 
   // ── Initial load (runs once per session, not on every remount) ────────────
   useEffect(() => {
-    // If workspaces are already in the store (e.g. AppShell remounted after
-    // navigating back from WorkspaceSettings), skip the full load entirely.
-    const existing = useAppStore.getState();
-    if (existing.workspaces.length > 0) {
-      if (existing.dataLoading) setDataLoading(false);
-      return;
-    }
-
     let cancelled = false;
 
     async function initialHydrate() {
-      setDataError(null);
+      const existing = useAppStore.getState();
+      if (existing.workspaces.length > 0) {
+        if (existing.dataLoading) setDataLoading(false);
+        return;
+      }
+
+      if (!bootstrapPromise) {
+        bootstrapPromise = (async () => {
+          try {
+            setDataError(null);
+            const { workspace: ensuredWorkspace, channel: ensuredChannel } =
+              await ensureDefaultWorkspaceAndChannel();
+
+            const workspaces = await fetchWorkspaces();
+
+            const initialState = useAppStore.getState();
+            const workspace =
+              workspaces.find((w) => w.id === initialState.currentWorkspaceId) ??
+              workspaces.find((w) => w.id === ensuredWorkspace.id) ??
+              workspaces[0];
+
+            if (!workspace) {
+              useAppStore.setState({
+                workspaces: [],
+                channels: [],
+                messages: [],
+                currentWorkspaceId: null,
+                currentChannelId: null,
+              });
+              return;
+            }
+
+            const channels = await fetchChannels(workspace.id);
+            const channel =
+              channels.find((c) => c.id === initialState.currentChannelId) ??
+              channels.find((c) => c.id === ensuredChannel.id) ??
+              channels[0];
+
+            if (!channel) {
+              useAppStore.setState({
+                workspaces,
+                channels,
+                messages: [],
+                currentWorkspaceId: workspace.id,
+                currentChannelId: null,
+              });
+              return;
+            }
+
+            const messages = await fetchMessages(channel.id);
+            useAppStore.setState({
+              workspaces,
+              channels,
+              messages,
+              currentWorkspaceId: workspace.id,
+              currentChannelId: channel.id,
+            });
+          } catch (e) {
+            bootstrapPromise = null;
+            throw e;
+          }
+        })();
+      }
+
       try {
-        const { workspace: ensuredWorkspace, channel: ensuredChannel } = await ensureDefaultWorkspaceAndChannel();
-        if (cancelled) return;
-
-        const workspaces = await fetchWorkspaces();
-        if (cancelled) return;
-
-        // Preserve current selection where possible (for remounts/navigation)
-        const initialState = useAppStore.getState();
-        const workspace =
-          workspaces.find((w) => w.id === initialState.currentWorkspaceId) ??
-          workspaces.find((w) => w.id === ensuredWorkspace.id) ??
-          workspaces[0];
-
-        if (!workspace) {
-          useAppStore.setState({
-            workspaces: [],
-            channels: [],
-            messages: [],
-            currentWorkspaceId: null,
-            currentChannelId: null,
-          });
-          return;
-        }
-
-        const channels = await fetchChannels(workspace.id);
-        if (cancelled) return;
-
-        const channel =
-          channels.find((c) => c.id === initialState.currentChannelId) ??
-          channels.find((c) => c.id === ensuredChannel.id) ??
-          channels[0];
-
-        if (!channel) {
-          useAppStore.setState({
-            workspaces,
-            channels,
-            messages: [],
-            currentWorkspaceId: workspace.id,
-            currentChannelId: null,
-          });
-          return;
-        }
-
-        const messages = await fetchMessages(channel.id);
-        if (cancelled) return;
-
-        // Batch-write to minimize renders during initial bootstrap.
-        useAppStore.setState({
-          workspaces,
-          channels,
-          messages,
-          currentWorkspaceId: workspace.id,
-          currentChannelId: channel.id,
-        });
+        await bootstrapPromise;
       } catch (e) {
-        if (!cancelled)
+        if (!cancelled) {
           setDataError(e instanceof Error ? e.message : 'Failed to load data');
+        }
       } finally {
         if (!cancelled) setDataLoading(false);
       }

@@ -3,7 +3,8 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import { ProtectedRoute } from "@/components/ProtectedRoute";
+import { PublicOnlyRoute } from "@/components/PublicOnlyRoute";
+import { ProtectedAppBootstrap } from "@/components/ProtectedAppBootstrap";
 import { isSupabaseConfigured } from "@/lib/supabase";
 import AppPage from "./pages/App";
 import Login from "./pages/Login";
@@ -33,15 +34,17 @@ const App = () => {
           <Route path="/" element={<Navigate to="/app" replace />} />
 
           {/* Auth */}
-          <Route path="/login" element={<Login />} />
-          <Route path="/signup" element={<Signup />} />
-          <Route path="/forgot-password" element={<ForgotPassword />} />
+          <Route path="/login" element={<PublicOnlyRoute><Login /></PublicOnlyRoute>} />
+          <Route path="/signup" element={<PublicOnlyRoute><Signup /></PublicOnlyRoute>} />
+          <Route path="/forgot-password" element={<PublicOnlyRoute><ForgotPassword /></PublicOnlyRoute>} />
 
-          {/* Main app (protected) */}
-          <Route path="/app/account" element={<ProtectedRoute><AccountSettings /></ProtectedRoute>} />
-          <Route path="/app" element={<ProtectedRoute><AppPage /></ProtectedRoute>} />
-          <Route path="/app/:workspaceId/:channelId" element={<ProtectedRoute><WorkspaceChannel /></ProtectedRoute>} />
-          <Route path="/app/:workspaceId/settings" element={<ProtectedRoute><WorkspaceSettings /></ProtectedRoute>} />
+          {/* Main app (protected + bootstrapped) */}
+          <Route path="/app" element={<ProtectedAppBootstrap />}>
+            <Route index element={<AppPage />} />
+            <Route path="account" element={<AccountSettings />} />
+            <Route path=":workspaceId/:channelId" element={<WorkspaceChannel />} />
+            <Route path=":workspaceId/settings" element={<WorkspaceSettings />} />
+          </Route>
 
           {/* Catch-all */}
           <Route path="*" element={<NotFound />} />
