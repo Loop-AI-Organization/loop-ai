@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
-import { X, Clock, Brain, File, ListChecks, FileText, Bookmark, BotOff } from 'lucide-react';
+import { X, Clock, Brain, File, ListChecks, FileText, Bookmark, BotOff, Download, Loader2 } from 'lucide-react';
 import { useAppStore } from '@/store/app-store';
-import { fetchWorkspaceFiles, fetchChannelTasks, updateChannelSettings } from '@/lib/supabase-data';
+import { fetchWorkspaceFiles, fetchChannelTasks, updateChannelSettings, exportChannelTasks } from '@/lib/supabase-data';
 import { getSupabase } from '@/lib/supabase';
 import type { Action, FileRecord, Task } from '@/types';
 import { FileCard } from '@/components/file-card';
@@ -32,6 +32,9 @@ export function InspectorPanel() {
   const [workspaceFiles, setWorkspaceFiles] = useState<FileRecord[]>([]);
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [settingsError, setSettingsError] = useState<string | null>(null);
+  const [exportingTasks, setExportingTasks] = useState(false);
+  const [taskExportMessage, setTaskExportMessage] = useState<string | null>(null);
+  const [taskExportError, setTaskExportError] = useState<string | null>(null);
 
   const threadActions = currentChannelId ? actions : [];
   const currentChannel = channels.find((channel) => channel.id === currentChannelId) ?? null;
@@ -52,6 +55,24 @@ export function InspectorPanel() {
       setSettingsError(message);
     } finally {
       setSettingsSaving(false);
+    }
+  }
+
+  async function handleExportTasks() {
+    if (!currentChannelId || !currentWorkspaceId) return;
+    setExportingTasks(true);
+    setTaskExportMessage(null);
+    setTaskExportError(null);
+    try {
+      await exportChannelTasks(currentChannelId);
+      const files = await fetchWorkspaceFiles(currentWorkspaceId);
+      setWorkspaceFiles(files);
+      setTaskExportMessage('Task export created.');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not export tasks. Try again.';
+      setTaskExportError(message);
+    } finally {
+      setExportingTasks(false);
     }
   }
 
@@ -133,6 +154,7 @@ export function InspectorPanel() {
   const channelTasks = tasks.filter((t) => t.channelId === currentChannelId);
   const proposedTasks = channelTasks.filter((t) => t.status === 'proposed');
   const activeTasks = channelTasks.filter((t) => t.status !== 'proposed');
+  const canExportTasks = activeTasks.length > 0;
 
   if (!isInspectorOpen) return null;
 
@@ -248,9 +270,38 @@ export function InspectorPanel() {
           </TabsContent>
 
           {/* Tasks Tab */}
-          <TabsContent value="tasks" className="flex-1 m-0 overflow-hidden">
+          <TabsContent value="tasks" forceMount className="flex-1 m-0 overflow-hidden">
             <ScrollArea className="h-full">
               <div className="p-4 space-y-4">
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                      Taskboard
+                    </p>
+                    {taskExportMessage && (
+                      <p className="text-2xs text-muted-foreground">{taskExportMessage}</p>
+                    )}
+                    {taskExportError && (
+                      <p className="text-2xs text-destructive">{taskExportError}</p>
+                    )}
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 gap-1.5 text-xs"
+                    onClick={handleExportTasks}
+                    disabled={!canExportTasks || exportingTasks}
+                    data-testid="export-tasks-button"
+                    title={canExportTasks ? 'Export confirmed tasks' : 'Confirm at least one task before exporting'}
+                  >
+                    {exportingTasks ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Download className="w-3.5 h-3.5" />
+                    )}
+                    Export
+                  </Button>
+                </div>
                 {channelTasks.length === 0 ? (
                   <div className="text-center py-8 text-muted-foreground text-sm">
                     No tasks yet — ask the AI to track something
