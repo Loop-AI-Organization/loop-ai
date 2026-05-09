@@ -268,6 +268,20 @@ def _select_channel_by_id(channel_id: str) -> Optional[dict]:
     return res.data[0] if res.data else None
 
 
+def _user_can_access_channel(channel: dict, user_id: str) -> bool:
+    if channel.get("type") != "dm":
+        return True
+    member = (
+        supabase.table("channel_members")
+        .select("user_id")
+        .eq("channel_id", channel["id"])
+        .eq("user_id", user_id)
+        .limit(1)
+        .execute()
+    )
+    return bool(member.data)
+
+
 @router.post("/api/workspaces/{workspace_id}/members/invite")
 async def invite_workspace_member_by_email(
     workspace_id: str,
@@ -838,6 +852,8 @@ def export_channel_tasks(
     workspace_id = channel["workspace_id"]
     if not _user_can_access_workspace(workspace_id, uid):
         raise HTTPException(status_code=403, detail="Not a member of this workspace")
+    if not _user_can_access_channel(channel, uid):
+        raise HTTPException(status_code=403, detail="Not a member of this channel")
 
     confirmed_tasks = (
         supabase.table("tasks")

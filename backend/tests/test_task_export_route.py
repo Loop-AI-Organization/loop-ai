@@ -28,15 +28,19 @@ class _TaskQuery:
 
 
 class _Supabase:
-    def __init__(self, task_rows):
+    def __init__(self, task_rows, member_rows=None):
         self.task_rows = task_rows
+        self.member_rows = member_rows if member_rows is not None else [{"user_id": "user-1"}]
         self.queried_tables = []
 
     def table(self, table_name):
         self.queried_tables.append(table_name)
+        if table_name == "tasks":
+            return _TaskQuery(self.task_rows)
+        if table_name == "channel_members":
+            return _TaskQuery(self.member_rows)
         if table_name != "tasks":
             raise AssertionError(f"Unexpected table query: {table_name}")
-        return _TaskQuery(self.task_rows)
 
 
 class TaskExportRouteTest(unittest.TestCase):
@@ -121,6 +125,22 @@ class TaskExportRouteTest(unittest.TestCase):
 
         self.assertEqual(ctx.exception.status_code, 403)
         self.assertEqual(supabase.queried_tables, [])
+        export_mock.assert_not_called()
+
+    def test_returns_403_when_user_is_not_dm_channel_member(self):
+        supabase = _Supabase([{"id": "task-1"}], member_rows=[])
+        with patch(
+            "app.routes._select_channel_by_id",
+            return_value={"id": "ch-1", "workspace_id": "ws-1", "type": "dm"},
+        ), patch("app.routes._user_can_access_workspace", return_value=True), patch(
+            "app.routes.supabase", supabase
+        ), patch("app.routes.export_tasks_as_document") as export_mock:
+            with self.assertRaises(HTTPException) as ctx:
+                export_channel_tasks("ch-1", {"sub": "user-1"})
+
+        self.assertEqual(ctx.exception.status_code, 403)
+        self.assertEqual(ctx.exception.detail, "Not a member of this channel")
+        self.assertEqual(supabase.queried_tables, ["channel_members"])
         export_mock.assert_not_called()
 
 
