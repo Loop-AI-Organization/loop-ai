@@ -38,7 +38,9 @@ describe('InspectorPanel task export', () => {
   let container: HTMLDivElement | null = null;
 
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
+    vi.mocked(fetchChannelTasks).mockResolvedValue([]);
+    vi.mocked(fetchWorkspaceFiles).mockResolvedValue([]);
     useAppStore.setState({
       isInspectorOpen: true,
       currentWorkspaceId: 'ws-1',
@@ -72,6 +74,19 @@ describe('InspectorPanel task export', () => {
     });
   }
 
+  async function activateTasksTab() {
+    const tasksTab = container!.querySelector('[id$="-trigger-tasks"]') as HTMLButtonElement | null;
+    if (!tasksTab) throw new Error('Tasks tab not found');
+    await act(async () => {
+      tasksTab.dispatchEvent(new MouseEvent('mousedown', {
+        bubbles: true,
+        button: 0,
+        ctrlKey: false,
+      }));
+      await Promise.resolve();
+    });
+  }
+
   afterEach(async () => {
     if (root) {
       await act(async () => root!.unmount());
@@ -89,6 +104,7 @@ describe('InspectorPanel task export', () => {
     vi.mocked(fetchChannelTasks).mockResolvedValue(tasks);
 
     await renderPanel();
+    await activateTasksTab();
 
     const button = exportButton();
     expect(button).toBeDisabled();
@@ -105,6 +121,7 @@ describe('InspectorPanel task export', () => {
     vi.mocked(fetchWorkspaceFiles).mockResolvedValue([fileRecord('file-1')]);
 
     await renderPanel();
+    await activateTasksTab();
 
     await act(async () => {
       exportButton().click();
@@ -113,6 +130,7 @@ describe('InspectorPanel task export', () => {
     expect(exportChannelTasks).toHaveBeenCalledWith('ch-1');
     expect(fetchWorkspaceFiles).toHaveBeenCalledWith('ws-1');
     expect(container!.textContent).toContain('Task export created.');
+    expect(container!.querySelector('[role="status"]')?.textContent).toBe('Task export created.');
   });
 
   it('disables the export button while export is in progress', async () => {
@@ -129,6 +147,7 @@ describe('InspectorPanel task export', () => {
     vi.mocked(fetchWorkspaceFiles).mockResolvedValue([]);
 
     await renderPanel();
+    await activateTasksTab();
 
     await act(async () => {
       exportButton().click();
@@ -153,16 +172,76 @@ describe('InspectorPanel task export', () => {
     vi.mocked(exportChannelTasks).mockRejectedValue(new Error('No confirmed tasks available to export'));
 
     await renderPanel();
+    await activateTasksTab();
 
     await act(async () => {
       exportButton().click();
     });
 
     expect(container!.textContent).toContain('No confirmed tasks available to export');
+    expect(container!.querySelector('[role="alert"]')?.textContent).toBe('No confirmed tasks available to export');
+  });
+
+  it('does not mount the export button before the Tasks tab is active', async () => {
+    const tasks = [task({ id: 'task-5', status: 'open', title: 'Keep tab isolated' })];
+    useAppStore.setState({ tasks });
+    vi.mocked(fetchChannelTasks).mockResolvedValue(tasks);
+
+    await renderPanel();
+
+    expect(exportButton()).toBeNull();
+  });
+
+  it('resets export feedback and ignores stale export completion after channel changes', async () => {
+    const tasks = [task({ id: 'task-6', status: 'open', title: 'Slow export' })];
+    useAppStore.setState({ tasks });
+    vi.mocked(fetchChannelTasks).mockResolvedValue(tasks);
+    let resolveExport!: (file: FileRecord) => void;
+    const exportPromise = new Promise<FileRecord>((resolve) => {
+      resolveExport = resolve;
+    });
+    vi.mocked(exportChannelTasks).mockReturnValue(exportPromise);
+    vi.mocked(fetchWorkspaceFiles).mockResolvedValue([fileRecord('stale-file')]);
+
+    await renderPanel();
+    await activateTasksTab();
+
+    await act(async () => {
+      exportButton()!.click();
+    });
+    expect(exportButton()).toBeDisabled();
+
+    await act(async () => {
+      useAppStore.setState({
+        currentChannelId: 'ch-2',
+        channels: [
+          {
+            id: 'ch-2',
+            workspaceId: 'ws-1',
+            name: 'Next channel',
+            type: 'project',
+            isLlmRestricted: false,
+            llmParticipationEnabled: true,
+            unreadCount: 0,
+          },
+        ],
+        tasks: [],
+      });
+      await Promise.resolve();
+    });
+
+    expect(container!.textContent).not.toContain('Task export created.');
+
+    await act(async () => {
+      resolveExport(fileRecord('stale-file'));
+      await exportPromise;
+    });
+
+    expect(container!.textContent).not.toContain('Task export created.');
   });
 
   function exportButton() {
-    return container!.querySelector('[data-testid="export-tasks-button"]') as HTMLButtonElement;
+    return container!.querySelector('[data-testid="export-tasks-button"]') as HTMLButtonElement | null;
   }
 });
 

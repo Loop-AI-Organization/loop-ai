@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { X, Clock, Brain, File, ListChecks, FileText, Bookmark, BotOff, Download, Loader2 } from 'lucide-react';
 import { useAppStore } from '@/store/app-store';
 import { fetchWorkspaceFiles, fetchChannelTasks, updateChannelSettings, exportChannelTasks } from '@/lib/supabase-data';
@@ -35,6 +35,7 @@ export function InspectorPanel() {
   const [exportingTasks, setExportingTasks] = useState(false);
   const [taskExportMessage, setTaskExportMessage] = useState<string | null>(null);
   const [taskExportError, setTaskExportError] = useState<string | null>(null);
+  const taskExportRequestIdRef = useRef(0);
 
   const threadActions = currentChannelId ? actions : [];
   const currentChannel = channels.find((channel) => channel.id === currentChannelId) ?? null;
@@ -60,21 +61,34 @@ export function InspectorPanel() {
 
   async function handleExportTasks() {
     if (!currentChannelId || !currentWorkspaceId) return;
+    const requestId = taskExportRequestIdRef.current + 1;
+    taskExportRequestIdRef.current = requestId;
     setExportingTasks(true);
     setTaskExportMessage(null);
     setTaskExportError(null);
     try {
       await exportChannelTasks(currentChannelId);
       const files = await fetchWorkspaceFiles(currentWorkspaceId);
+      if (taskExportRequestIdRef.current !== requestId) return;
       setWorkspaceFiles(files);
       setTaskExportMessage('Task export created.');
     } catch (error) {
+      if (taskExportRequestIdRef.current !== requestId) return;
       const message = error instanceof Error ? error.message : 'Could not export tasks. Try again.';
       setTaskExportError(message);
     } finally {
-      setExportingTasks(false);
+      if (taskExportRequestIdRef.current === requestId) {
+        setExportingTasks(false);
+      }
     }
   }
+
+  useEffect(() => {
+    taskExportRequestIdRef.current += 1;
+    setExportingTasks(false);
+    setTaskExportMessage(null);
+    setTaskExportError(null);
+  }, [currentChannelId, currentWorkspaceId]);
 
   useEffect(() => {
     if (!currentWorkspaceId) {
@@ -270,7 +284,7 @@ export function InspectorPanel() {
           </TabsContent>
 
           {/* Tasks Tab */}
-          <TabsContent value="tasks" forceMount className="flex-1 m-0 overflow-hidden">
+          <TabsContent value="tasks" className="flex-1 m-0 overflow-hidden">
             <ScrollArea className="h-full">
               <div className="p-4 space-y-4">
                 <div className="flex items-center justify-between gap-2">
@@ -279,10 +293,14 @@ export function InspectorPanel() {
                       Taskboard
                     </p>
                     {taskExportMessage && (
-                      <p className="text-2xs text-muted-foreground">{taskExportMessage}</p>
+                      <p className="text-2xs text-muted-foreground" role="status" aria-live="polite">
+                        {taskExportMessage}
+                      </p>
                     )}
                     {taskExportError && (
-                      <p className="text-2xs text-destructive">{taskExportError}</p>
+                      <p className="text-2xs text-destructive" role="alert">
+                        {taskExportError}
+                      </p>
                     )}
                   </div>
                   <Button
