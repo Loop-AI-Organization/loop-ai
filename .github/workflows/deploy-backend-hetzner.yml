@@ -21,42 +21,35 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Prepare server and write .env
+      - name: Setup directories and env file on Hetzner
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.HETZNER_HOST }}
           port: 22
           username: ${{ secrets.HETZNER_USER }}
-          password: ${{ secrets.HETZNER_PASSWORD }}
+          key: ${{ secrets.HETZNER_SSH_KEY }}
+          passphrase: ${{ secrets.HETZNER_SSH_PASSPHRASE }}
           script: |
             set -e
             APP_DIR="$HOME/loop-ai"
-            SUDO=""
-            if [ "$(id -u)" -ne 0 ]; then
-              if ! command -v sudo >/dev/null 2>&1; then
-                echo "sudo is required for non-root users"
-                exit 1
-              fi
-              SUDO="sudo"
-            fi
 
-            # Install Docker + compose plugin if missing (Ubuntu/Debian)
+            # Install Docker and Compose plugin if missing (Ubuntu/Debian)
             if ! command -v docker >/dev/null 2>&1; then
-              $SUDO apt-get update
-              $SUDO apt-get install -y ca-certificates curl gnupg lsb-release
+              apt-get update
+              apt-get install -y ca-certificates curl gnupg lsb-release
 
-              $SUDO install -m 0755 -d /etc/apt/keyrings
-              curl -fsSL https://download.docker.com/linux/ubuntu/gpg | $SUDO gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-              $SUDO chmod a+r /etc/apt/keyrings/docker.gpg
+              install -m 0755 -d /etc/apt/keyrings
+              curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+              chmod a+r /etc/apt/keyrings/docker.gpg
 
               echo \
                 "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
-                $(lsb_release -cs) stable" | $SUDO tee /etc/apt/sources.list.d/docker.list > /dev/null
+                $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
 
-              $SUDO apt-get update
-              $SUDO apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-              $SUDO systemctl enable docker
-              $SUDO systemctl start docker
+              apt-get update
+              apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+              systemctl enable docker
+              systemctl start docker
             fi
 
             mkdir -p "$APP_DIR/backend"
@@ -66,35 +59,44 @@ jobs:
             EOF
 
       - name: Sync backend files
-        uses: appleboy/scp-action@v0.1.7
+        uses: burnett01/rsync-deployments@6.0.0
         with:
-          host: ${{ secrets.HETZNER_HOST }}
-          port: 22
-          username: ${{ secrets.HETZNER_USER }}
-          password: ${{ secrets.HETZNER_PASSWORD }}
-          source: "backend/*"
-          target: "~/loop-ai/backend"
+          switches: -avzr --delete --exclude='.git' --exclude='__pycache__' --exclude='*.pyc' --exclude='.env'
+          path: backend/
+          remote_path: ~/loop-ai/backend/
+          remote_host: ${{ secrets.HETZNER_HOST }}
+          remote_port: 22
+          remote_user: ${{ secrets.HETZNER_USER }}
+          remote_key: ${{ secrets.HETZNER_SSH_KEY }}
+          remote_key_pass: ${{ secrets.HETZNER_SSH_PASSPHRASE }}
 
-      - name: Deploy backend stack
+      - name: Deploy on Hetzner
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.HETZNER_HOST }}
           port: 22
           username: ${{ secrets.HETZNER_USER }}
-          password: ${{ secrets.HETZNER_PASSWORD }}
+          key: ${{ secrets.HETZNER_SSH_KEY }}
+          passphrase: ${{ secrets.HETZNER_SSH_PASSPHRASE }}
           script: |
             set -e
             cd ~/loop-ai/backend
 
-            DOCKER="docker"
-            if ! docker ps >/dev/null 2>&1; then
-              DOCKER="sudo docker"
-            fi
+            echo "=== Checking files ==="
+            ls -la docker-compose.prod.yml ../.env
 
-            $DOCKER compose -f docker-compose.prod.yml down || true
-            $DOCKER compose -f docker-compose.prod.yml up -d --build
-            $DOCKER image prune -af || true
+            echo "=== Stopping existing containers ==="
+            docker compose -f docker-compose.prod.yml down || true
 
-            $DOCKER compose -f docker-compose.prod.yml ps
-            $DOCKER compose -f docker-compose.prod.yml logs api --tail=50
-            $DOCKER compose -f docker-compose.prod.yml logs worker --tail=50
+            echo "=== Building and starting containers ==="
+            docker compose -f docker-compose.prod.yml up -d --build
+
+            echo "=== Cleaning up old images ==="
+            docker image prune -af --force || true
+
+            echo "=== Running containers ==="
+            docker compose -f docker-compose.prod.yml ps
+
+            echo "=== Recent logs ==="
+            docker compose -f docker-compose.prod.yml logs api --tail=50
+            docker compose -f docker-compose.prod.yml logs worker --tail=50
