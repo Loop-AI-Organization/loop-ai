@@ -823,6 +823,33 @@ async def list_channel_tasks(
     return {"tasks": res.data or []}
 
 
+@router.post("/api/channels/{channel_id}/tasks/export")
+async def export_channel_tasks(
+    channel_id: str,
+    user: Annotated[dict, Depends(get_current_user)],
+):
+    uid = user.get("sub")
+    if not uid:
+        raise HTTPException(status_code=401, detail="Invalid user")
+
+    channel = _select_channel_by_id(channel_id)
+    if not channel:
+        raise HTTPException(status_code=404, detail="Channel not found")
+    workspace_id = channel["workspace_id"]
+    if not _user_can_access_workspace(workspace_id, uid):
+        raise HTTPException(status_code=403, detail="Not a member of this workspace")
+
+    generated = export_tasks_as_document(
+        channel_id=channel_id,
+        workspace_id=workspace_id,
+        title="Task List",
+        created_by=uid,
+    )
+    if not generated:
+        raise HTTPException(status_code=400, detail="No confirmed tasks available to export")
+    return {"file": generated}
+
+
 @router.post("/api/tasks/{task_id}/confirm")
 async def confirm_task(
     task_id: str,
