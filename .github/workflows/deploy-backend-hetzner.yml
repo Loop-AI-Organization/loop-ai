@@ -25,31 +25,38 @@ jobs:
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.HETZNER_HOST }}
-          port: ${{ secrets.HETZNER_PORT || '22' }}
+          port: 22
           username: ${{ secrets.HETZNER_USER }}
-          key: ${{ secrets.HETZNER_SSH_KEY }}
-          passphrase: ${{ secrets.HETZNER_SSH_PASSPHRASE }}
+          password: ${{ secrets.HETZNER_PASSWORD }}
           script: |
             set -e
             APP_DIR="$HOME/loop-ai"
+            SUDO=""
+            if [ "$(id -u)" -ne 0 ]; then
+              if ! command -v sudo >/dev/null 2>&1; then
+                echo "sudo is required for non-root users"
+                exit 1
+              fi
+              SUDO="sudo"
+            fi
 
             # Install Docker + compose plugin if missing (Ubuntu/Debian)
             if ! command -v docker >/dev/null 2>&1; then
-              sudo apt-get update
-              sudo apt-get install -y ca-certificates curl gnupg lsb-release
+              $SUDO apt-get update
+              $SUDO apt-get install -y ca-certificates curl gnupg lsb-release
 
-              sudo install -m 0755 -d /etc/apt/keyrings
-              curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-              sudo chmod a+r /etc/apt/keyrings/docker.gpg
+              $SUDO install -m 0755 -d /etc/apt/keyrings
+              curl -fsSL https://download.docker.com/linux/ubuntu/gpg | $SUDO gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+              $SUDO chmod a+r /etc/apt/keyrings/docker.gpg
 
               echo \
                 "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
-                $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+                $(lsb_release -cs) stable" | $SUDO tee /etc/apt/sources.list.d/docker.list > /dev/null
 
-              sudo apt-get update
-              sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-              sudo systemctl enable docker
-              sudo systemctl start docker
+              $SUDO apt-get update
+              $SUDO apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+              $SUDO systemctl enable docker
+              $SUDO systemctl start docker
             fi
 
             mkdir -p "$APP_DIR/backend"
@@ -59,25 +66,22 @@ jobs:
             EOF
 
       - name: Sync backend files
-        uses: burnett01/rsync-deployments@6.0.0
+        uses: appleboy/scp-action@v0.1.7
         with:
-          switches: -avzr --delete --exclude='.git' --exclude='__pycache__' --exclude='*.pyc' --exclude='.env'
-          path: backend/
-          remote_path: ~/loop-ai/backend/
-          remote_host: ${{ secrets.HETZNER_HOST }}
-          remote_port: ${{ secrets.HETZNER_PORT || '22' }}
-          remote_user: ${{ secrets.HETZNER_USER }}
-          remote_key: ${{ secrets.HETZNER_SSH_KEY }}
-          remote_key_pass: ${{ secrets.HETZNER_SSH_PASSPHRASE }}
+          host: ${{ secrets.HETZNER_HOST }}
+          port: 22
+          username: ${{ secrets.HETZNER_USER }}
+          password: ${{ secrets.HETZNER_PASSWORD }}
+          source: "backend/*"
+          target: "~/loop-ai/backend"
 
       - name: Deploy backend stack
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.HETZNER_HOST }}
-          port: ${{ secrets.HETZNER_PORT || '22' }}
+          port: 22
           username: ${{ secrets.HETZNER_USER }}
-          key: ${{ secrets.HETZNER_SSH_KEY }}
-          passphrase: ${{ secrets.HETZNER_SSH_PASSPHRASE }}
+          password: ${{ secrets.HETZNER_PASSWORD }}
           script: |
             set -e
             cd ~/loop-ai/backend
