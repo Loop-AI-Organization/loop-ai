@@ -81,16 +81,17 @@ jobs:
             EOF
 
       - name: Sync backend files
-        uses: burnett01/rsync-deployments@6.0.0
+        uses: burnett01/rsync-deployments@8.0.4
         with:
           switches: -avzr --delete --exclude='.git' --exclude='__pycache__' --exclude='*.pyc' --exclude='.env'
           path: backend/
-          remote_path: ~/loop-ai/backend/
+          remote_path: /root/loop-ai/backend/
           remote_host: ${{ secrets.HETZNER_HOST }}
           remote_port: 22
           remote_user: ${{ secrets.HETZNER_USER }}
           remote_key: ${{ secrets.HETZNER_SSH_KEY }}
           remote_key_pass: ${{ secrets.HETZNER_SSH_PASSPHRASE }}
+          debug: true
 
       - name: Deploy on Hetzner
         uses: appleboy/ssh-action@v1.0.3
