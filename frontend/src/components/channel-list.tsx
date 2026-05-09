@@ -314,6 +314,7 @@ function ChannelGroup({
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleteInlineError, setDeleteInlineError] = useState<string | null>(null);
 
   const handleRename = async () => {
     if (!renameId || renaming) return;
@@ -341,8 +342,10 @@ function ChannelGroup({
     if (!deleteId || deleting) return;
     setDeleting(true);
     setDeleteError(null);
+    setDeleteInlineError(null);
 
     const targetId = deleteId;
+    const target = channels.find((c) => c.id === targetId);
 
     // Optimistic: remove from store immediately.
     useAppStore.setState((s) => ({
@@ -353,10 +356,13 @@ function ChannelGroup({
     if (currentChannelId === targetId) {
       const remaining = useAppStore
         .getState()
-        .channels.filter(
-          (c) => c.workspaceId === currentWorkspaceId && c.type === 'project'
-        );
-      const fallback = remaining.find((c) => c.name === 'general') ?? remaining[0];
+        .channels.filter((c) => c.workspaceId === currentWorkspaceId);
+      const generalProject = remaining.find(
+        (c) => c.type === 'project' && c.name.trim().toLowerCase() === 'general'
+      );
+      const anyProject = remaining.find((c) => c.type === 'project');
+      const anyDm = remaining.find((c) => c.type === 'dm');
+      const fallback = generalProject ?? anyProject ?? anyDm;
 
       if (fallback && currentWorkspaceId) {
         navigate(`/app/${currentWorkspaceId}/${fallback.id}`);
@@ -374,12 +380,11 @@ function ChannelGroup({
     try {
       await deleteChannel(targetId);
     } catch (e) {
-      console.error('Failed to delete channel:', e);
       // Revert optimistic update.
-      const target = channels.find((c) => c.id === targetId);
       if (target) {
         useAppStore.setState((s) => ({ channels: [...s.channels, target] }));
       }
+      setDeleteInlineError(e instanceof Error ? e.message : 'Failed to delete channel');
     }
   };
 
@@ -389,6 +394,7 @@ function ChannelGroup({
   return (
     <>
       <div className="space-y-0.5">
+        {deleteInlineError && <p className="px-3 py-1 text-sm text-destructive">{deleteInlineError}</p>}
         {channels.map((channel) => {
           const isDm = channel.type === 'dm';
           const canRename = isOwner && !showAvatar && !isDm;
@@ -458,6 +464,7 @@ function ChannelGroup({
                         e.preventDefault();
                         setDeleteId(channel.id);
                         setDeleteError(null);
+                        setDeleteInlineError(null);
                         setDeleteOpen(true);
                       }}
                       className="gap-2 text-destructive focus:text-destructive"

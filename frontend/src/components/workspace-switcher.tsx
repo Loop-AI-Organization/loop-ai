@@ -29,6 +29,8 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 
+const workspaceChannelResolveInFlight = new Map<string, Promise<{ workspaceId: string; channelId: string } | null>>();
+
 export function WorkspaceSwitcher() {
   const navigate = useNavigate();
   const [switching, setSwitching] = useState(false);
@@ -71,6 +73,10 @@ export function WorkspaceSwitcher() {
   const resolveWorkspaceChannel = async (
     wsId: string
   ): Promise<{ workspaceId: string; channelId: string } | null> => {
+    const existing = workspaceChannelResolveInFlight.get(wsId);
+    if (existing) return existing;
+
+    const resolver = (async () => {
     const state = useAppStore.getState();
     let wsChannels = state.channels.filter((c) => c.workspaceId === wsId);
 
@@ -85,6 +91,12 @@ export function WorkspaceSwitcher() {
     const target =
       wsChannels.find((c) => c.name === 'general') ?? wsChannels[0] ?? null;
     return target ? { workspaceId: wsId, channelId: target.id } : null;
+    })().finally(() => {
+      workspaceChannelResolveInFlight.delete(wsId);
+    });
+
+    workspaceChannelResolveInFlight.set(wsId, resolver);
+    return resolver;
   };
 
   // ── Workspace switching ───────────────────────────────────────────────────

@@ -38,8 +38,15 @@ export default function AccountSettings() {
     getSupabase().auth.getSession().then(({ data: { session } }) => {
       if (!cancelled && session?.user) {
         setUser(authUserToUser(session.user));
+      } else if (!cancelled) {
+        setError('Unable to load account profile.');
       }
       if (!cancelled) setLoading(false);
+    }).catch(() => {
+      if (!cancelled) {
+        setError('Unable to load account profile.');
+        setLoading(false);
+      }
     });
     return () => { cancelled = true; };
   }, [user, setUser]);
@@ -62,10 +69,21 @@ export default function AccountSettings() {
     }
   };
 
-  if (loading || !user) {
+  if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="animate-pulse text-muted-foreground">Loading…</div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background p-4">
+        <div className="text-center space-y-2">
+          <p className="text-destructive">{error ?? 'Unable to load account profile.'}</p>
+          <p className="text-sm text-muted-foreground">Please refresh and try again.</p>
+        </div>
       </div>
     );
   }

@@ -17,6 +17,44 @@ import type {
 
 const API_URL = import.meta.env.VITE_API_URL ?? 'https://api.loopai-project.me';
 
+const REQUEST_CACHE_TTL_MS = 5000;
+const inflightRequests = new Map<string, Promise<unknown>>();
+const settledRequestCache = new Map<string, { value: unknown; expiresAt: number }>();
+
+function readSettledCache<T>(key: string): T | null {
+  const cached = settledRequestCache.get(key);
+  if (!cached) return null;
+  if (cached.expiresAt <= Date.now()) {
+    settledRequestCache.delete(key);
+    return null;
+  }
+  return cached.value as T;
+}
+
+function writeSettledCache<T>(key: string, value: T) {
+  settledRequestCache.set(key, { value, expiresAt: Date.now() + REQUEST_CACHE_TTL_MS });
+}
+
+async function dedupeRequest<T>(key: string, loader: () => Promise<T>): Promise<T> {
+  const cached = readSettledCache<T>(key);
+  if (cached !== null) return cached;
+
+  const inFlight = inflightRequests.get(key);
+  if (inFlight) return inFlight as Promise<T>;
+
+  const request = loader()
+    .then((value) => {
+      writeSettledCache(key, value);
+      return value;
+    })
+    .finally(() => {
+      inflightRequests.delete(key);
+    });
+
+  inflightRequests.set(key, request);
+  return request;
+}
+
 // --- DB row types (snake_case) ---
 interface WorkspaceRow {
   id: string;
@@ -105,61 +143,63 @@ export async function updateAccountProfile(displayName: string): Promise<void> {
 }
 
 export async function fetchWorkspaces(): Promise<Workspace[]> {
-  const supabase = getSupabase();
-  const { data: { user }, error: userError } = await supabase.auth.getUser();
-  if (userError) throw userError;
-  if (!user) return [];
+  return dedupeRequest('workspaces', async () => {
+    const supabase = getSupabase();
+    const { data: { user }, error: userError } = await supabase.auth.getUser();
+    if (userError) throw userError;
+    if (!user) return [];
 
-  const ownedByUserIdQuery = supabase
-    .from('workspaces')
-    .select('id, user_id, owner_id, name, icon, created_at')
-    .eq('user_id', user.id);
-
-  const ownedByOwnerIdQuery = supabase
-    .from('workspaces')
-    .select('id, user_id, owner_id, name, icon, created_at')
-    .eq('owner_id', user.id);
-
-  const memberRowsQuery = supabase
-    .from('workspace_members')
-    .select('workspace_id')
-    .eq('user_id', user.id);
-
-  const [
-    { data: ownedByUserRows, error: ownedByUserError },
-    { data: ownedByOwnerRows, error: ownedByOwnerError },
-    { data: memberRows, error: memberError },
-  ] = await Promise.all([ownedByUserIdQuery, ownedByOwnerIdQuery, memberRowsQuery]);
-  if (ownedByUserError) throw ownedByUserError;
-  if (ownedByOwnerError) throw ownedByOwnerError;
-  if (memberError) throw memberError;
-
-  const ownedRows = [
-    ...((ownedByUserRows as WorkspaceRow[] | null) ?? []),
-    ...((ownedByOwnerRows as WorkspaceRow[] | null) ?? []),
-  ];
-  const ownedIds = new Set(ownedRows.map((r) => r.id));
-  const memberWorkspaceIds = Array.from(
-    new Set((memberRows ?? []).map((r: { workspace_id: string }) => r.workspace_id).filter(Boolean))
-  ).filter((id) => !ownedIds.has(id));
-
-  let memberWorkspaces: WorkspaceRow[] = [];
-  if (memberWorkspaceIds.length > 0) {
-    const { data: memberRowsDetailed, error: memberWsError } = await supabase
+    const ownedByUserIdQuery = supabase
       .from('workspaces')
       .select('id, user_id, owner_id, name, icon, created_at')
-      .in('id', memberWorkspaceIds);
-    if (memberWsError) throw memberWsError;
-    memberWorkspaces = (memberRowsDetailed as WorkspaceRow[]) ?? [];
-  }
+      .eq('user_id', user.id);
 
-  const uniqueById = new Map<string, WorkspaceRow>();
-  for (const row of ownedRows) uniqueById.set(row.id, row);
-  for (const row of memberWorkspaces) uniqueById.set(row.id, row);
+    const ownedByOwnerIdQuery = supabase
+      .from('workspaces')
+      .select('id, user_id, owner_id, name, icon, created_at')
+      .eq('owner_id', user.id);
 
-  return Array.from(uniqueById.values())
-    .sort((a, b) => a.created_at.localeCompare(b.created_at))
-    .map(toWorkspace);
+    const memberRowsQuery = supabase
+      .from('workspace_members')
+      .select('workspace_id')
+      .eq('user_id', user.id);
+
+    const [
+      { data: ownedByUserRows, error: ownedByUserError },
+      { data: ownedByOwnerRows, error: ownedByOwnerError },
+      { data: memberRows, error: memberError },
+    ] = await Promise.all([ownedByUserIdQuery, ownedByOwnerIdQuery, memberRowsQuery]);
+    if (ownedByUserError) throw ownedByUserError;
+    if (ownedByOwnerError) throw ownedByOwnerError;
+    if (memberError) throw memberError;
+
+    const ownedRows = [
+      ...((ownedByUserRows as WorkspaceRow[] | null) ?? []),
+      ...((ownedByOwnerRows as WorkspaceRow[] | null) ?? []),
+    ];
+    const ownedIds = new Set(ownedRows.map((r) => r.id));
+    const memberWorkspaceIds = Array.from(
+      new Set((memberRows ?? []).map((r: { workspace_id: string }) => r.workspace_id).filter(Boolean))
+    ).filter((id) => !ownedIds.has(id));
+
+    let memberWorkspaces: WorkspaceRow[] = [];
+    if (memberWorkspaceIds.length > 0) {
+      const { data: memberRowsDetailed, error: memberWsError } = await supabase
+        .from('workspaces')
+        .select('id, user_id, owner_id, name, icon, created_at')
+        .in('id', memberWorkspaceIds);
+      if (memberWsError) throw memberWsError;
+      memberWorkspaces = (memberRowsDetailed as WorkspaceRow[]) ?? [];
+    }
+
+    const uniqueById = new Map<string, WorkspaceRow>();
+    for (const row of ownedRows) uniqueById.set(row.id, row);
+    for (const row of memberWorkspaces) uniqueById.set(row.id, row);
+
+    return Array.from(uniqueById.values())
+      .sort((a, b) => a.created_at.localeCompare(b.created_at))
+      .map(toWorkspace);
+  });
 }
 
 export async function createWorkspace(params: { name?: string; icon?: string }): Promise<Workspace> {
@@ -227,14 +267,16 @@ export async function deleteWorkspace(workspaceId: string): Promise<void> {
 }
 
 export async function fetchChannels(workspaceId: string): Promise<Channel[]> {
-  const supabase = getSupabase();
-  const { data, error } = await supabase
-    .from('channels')
-    .select('id, workspace_id, name, type, is_llm_restricted, llm_participation_enabled, created_at')
-    .eq('workspace_id', workspaceId)
-    .order('created_at', { ascending: true });
-  if (error) throw error;
-  return (data as ChannelRow[]).map(toChannel);
+  return dedupeRequest(`channels:${workspaceId}`, async () => {
+    const supabase = getSupabase();
+    const { data, error } = await supabase
+      .from('channels')
+      .select('id, workspace_id, name, type, is_llm_restricted, llm_participation_enabled, created_at')
+      .eq('workspace_id', workspaceId)
+      .order('created_at', { ascending: true });
+    if (error) throw error;
+    return (data as ChannelRow[]).map(toChannel);
+  });
 }
 
 // --- Workspace members ---
@@ -544,15 +586,17 @@ export async function updateThreadTitle(threadId: string, title: string): Promis
 }
 
 export async function fetchMessages(channelId: string): Promise<Message[]> {
-  const supabase = getSupabase();
-  const threadId = await getOrCreateChannelThreadId(channelId);
-  const { data, error } = await supabase
-    .from('messages')
-    .select('id, thread_id, role, content, user_id, user_display_name, created_at')
-    .eq('thread_id', threadId)
-    .order('created_at', { ascending: true });
-  if (error) throw error;
-  return (data as MessageRow[]).map(toMessage);
+  return dedupeRequest(`messages:${channelId}`, async () => {
+    const supabase = getSupabase();
+    const threadId = await getOrCreateChannelThreadId(channelId);
+    const { data, error } = await supabase
+      .from('messages')
+      .select('id, thread_id, role, content, user_id, user_display_name, created_at')
+      .eq('thread_id', threadId)
+      .order('created_at', { ascending: true });
+    if (error) throw error;
+    return (data as MessageRow[]).map(toMessage);
+  });
 }
 
 export async function deleteMessage(messageId: string): Promise<void> {
