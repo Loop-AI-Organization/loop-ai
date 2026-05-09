@@ -197,8 +197,15 @@ function MessageContent({ content, files }: { content: string; files?: FileRecor
   useEffect(() => {
     if (taskIds.length === 0) return;
     setResolvedTasks((prev) => {
+      const storeTaskIds = new Set(storeTasks.map((t) => t.id));
       const next = new Map(prev);
       let changed = false;
+      for (const id of taskIds) {
+        if (next.has(id) && !storeTaskIds.has(id)) {
+          next.delete(id);
+          changed = true;
+        }
+      }
       for (const t of storeTasks) {
         if (taskIds.includes(t.id)) {
           next.set(t.id, t);
