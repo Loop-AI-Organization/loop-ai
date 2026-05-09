@@ -935,7 +935,7 @@ async def delete_task(
         raise HTTPException(status_code=401, detail="Invalid user")
     task_res = supabase.table("tasks").select("id, status").eq("id", task_id).execute()
     if not task_res.data:
-        raise HTTPException(status_code=404, detail="Task not found")
+        return {"ok": True}
     was_proposed = task_res.data[0].get("status") == "proposed"
     if was_proposed:
         supabase.table("task_events").insert({
