@@ -334,7 +334,7 @@ function TextContent({ content }: { content: string }) {
   let inCodeBlock = false;
   let codeContent = '';
   let codeLanguage = '';
-  let inTable = false;
+  const inTable = false;
   let tableRows: string[][] = [];
 
   for (let i = 0; i < lines.length; i++) {

@@ -748,6 +748,19 @@ export async function getFileDownloadUrl(fileId: string): Promise<string> {
   return body.url as string;
 }
 
+export async function exportChannelTasks(channelId: string): Promise<FileRecord> {
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${API_URL}/api/channels/${channelId}/tasks/export`, {
+    method: 'POST',
+    headers,
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(body.detail ?? body.message ?? `Failed to export tasks (${res.status})`);
+  }
+  return toFileRecord(body.file as FileRow);
+}
+
 export async function ensureDefaultWorkspaceAndChannel(): Promise<{ workspace: Workspace; channel: Channel }> {
   const workspaces = await fetchWorkspaces();
   if (workspaces.length > 0) {

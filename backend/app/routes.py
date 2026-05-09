@@ -268,6 +268,48 @@ def _select_channel_by_id(channel_id: str) -> Optional[dict]:
     return res.data[0] if res.data else None
 
 
+def _user_can_access_channel(channel: dict, user_id: str) -> bool:
+    if channel.get("type") != "dm":
+        return True
+    member = (
+        supabase.table("channel_members")
+        .select("user_id")
+        .eq("channel_id", channel["id"])
+        .eq("user_id", user_id)
+        .limit(1)
+        .execute()
+    )
+    return bool(member.data)
+
+
+def _partition_resolved_assignees(
+    raw_names: List[str],
+    resolved: List[Dict],
+) -> tuple[List[Dict], List[str]]:
+    matched: List[Dict] = []
+    unmatched: List[str] = []
+    for raw_name, assignee in zip(raw_names, resolved):
+        if assignee.get("user_id"):
+            matched.append(assignee)
+        else:
+            unmatched.append(raw_name)
+    return matched, unmatched
+
+
+def _format_unresolved_assignee_note(names: List[str]) -> str:
+    clean_names = [name.strip() for name in names if name and name.strip()]
+    if not clean_names:
+        return ""
+    quoted = [f'"{name}"' for name in clean_names]
+    if len(quoted) == 1:
+        names_text = quoted[0]
+        suffix = "that assignee"
+    else:
+        names_text = ", ".join(quoted[:-1]) + f" or {quoted[-1]}"
+        suffix = "those assignees"
+    return f"I couldn't find {names_text} in this workspace, so I left {suffix} unassigned."
+
+
 @router.post("/api/workspaces/{workspace_id}/members/invite")
 async def invite_workspace_member_by_email(
     workspace_id: str,
@@ -821,6 +863,46 @@ async def list_channel_tasks(
         .execute()
     )
     return {"tasks": res.data or []}
+
+
+@router.post("/api/channels/{channel_id}/tasks/export")
+def export_channel_tasks(
+    channel_id: str,
+    user: Annotated[dict, Depends(get_current_user)],
+):
+    uid = user.get("sub")
+    if not uid:
+        raise HTTPException(status_code=401, detail="Invalid user")
+
+    channel = _select_channel_by_id(channel_id)
+    if not channel:
+        raise HTTPException(status_code=404, detail="Channel not found")
+    workspace_id = channel["workspace_id"]
+    if not _user_can_access_workspace(workspace_id, uid):
+        raise HTTPException(status_code=403, detail="Not a member of this workspace")
+    if not _user_can_access_channel(channel, uid):
+        raise HTTPException(status_code=403, detail="Not a member of this channel")
+
+    confirmed_tasks = (
+        supabase.table("tasks")
+        .select("id")
+        .eq("channel_id", channel_id)
+        .neq("status", "proposed")
+        .limit(1)
+        .execute()
+    )
+    if not confirmed_tasks.data:
+        raise HTTPException(status_code=400, detail="No confirmed tasks available to export")
+
+    generated = export_tasks_as_document(
+        channel_id=channel_id,
+        workspace_id=workspace_id,
+        title="Task List",
+        created_by=uid,
+    )
+    if not generated:
+        raise HTTPException(status_code=500, detail="Failed to export tasks")
+    return {"file": generated}
 
 
 @router.post("/api/tasks/{task_id}/confirm")
@@ -1773,6 +1855,7 @@ async def respond_to_ai_mention(
                 return {"should_respond": True, "content": "I couldn't create the task right now."}
             task = task_res.data[0]
             task_id = task["id"]
+            unresolved_assignees: List[str] = []
 
             if assignees:
                 settings = get_settings()
@@ -1787,20 +1870,25 @@ async def respond_to_ai_mention(
                         service_role_key=settings.supabase_service_role_key,
                     ),
                 )
-                supabase.table("task_assignees").insert([
-                    {"task_id": task_id, "display_name": r["display_name"], "user_id": r["user_id"], "added_by": uid}
-                    for r in resolved
-                ]).execute()
-                assignees = [r["display_name"] for r in resolved]
+                matched_assignees, unresolved_assignees = _partition_resolved_assignees(raw_names, resolved)
+                if matched_assignees:
+                    supabase.table("task_assignees").insert([
+                        {"task_id": task_id, "display_name": r["display_name"], "user_id": r["user_id"], "added_by": uid}
+                        for r in matched_assignees
+                    ]).execute()
+                assignees = [r["display_name"] for r in matched_assignees]
 
             supabase.table("task_events").insert({
                 "task_id": task_id,
                 "kind": "created",
                 "actor_user_id": uid,
-                "payload": {"title": title, "assignees": assignees},
+                "payload": {"title": title, "assignees": assignees, "unresolved_assignees": unresolved_assignees},
             }).execute()
 
             content = f"I've added a task for review:\n\n:::task{{id=\"{task_id}\"}}"
+            unresolved_note = _format_unresolved_assignee_note(unresolved_assignees)
+            if unresolved_note:
+                content += f"\n\n{unresolved_note}"
             try:
                 result = supabase.table("messages").insert({
                     "thread_id": thread_id,
@@ -1862,13 +1950,32 @@ async def respond_to_ai_mention(
                 event_payload.update(task_updates)
 
             if updates.get("assignees"):
-                new_assignees = updates["assignees"]
+                raw_names = updates["assignees"]
+                settings = get_settings()
+                ws_id = workspace_id
+                resolved = await loop.run_in_executor(
+                    None,
+                    lambda n=raw_names, w=ws_id: resolve_assignees(
+                        workspace_id=w,
+                        names=n,
+                        supabase_url=str(settings.supabase_url),
+                        service_role_key=settings.supabase_service_role_key,
+                    ),
+                )
+                matched_assignees, unresolved_assignees = _partition_resolved_assignees(raw_names, resolved)
                 supabase.table("task_assignees").delete().eq("task_id", task_id).execute()
-                supabase.table("task_assignees").insert([
-                    {"task_id": task_id, "display_name": name, "added_by": uid}
-                    for name in new_assignees
-                ]).execute()
-                event_payload["assignees"] = new_assignees
+                if matched_assignees:
+                    supabase.table("task_assignees").insert([
+                        {
+                            "task_id": task_id,
+                            "display_name": r["display_name"],
+                            "user_id": r["user_id"],
+                            "added_by": uid,
+                        }
+                        for r in matched_assignees
+                    ]).execute()
+                event_payload["assignees"] = [r["display_name"] for r in matched_assignees]
+                event_payload["unresolved_assignees"] = unresolved_assignees
 
             if event_payload:
                 supabase.table("task_events").insert({
@@ -1879,6 +1986,9 @@ async def respond_to_ai_mention(
                 }).execute()
 
             content = f"Done — task updated:\n\n:::task{{id=\"{task_id}\"}}"
+            unresolved_note = _format_unresolved_assignee_note(event_payload.get("unresolved_assignees", []))
+            if unresolved_note:
+                content += f"\n\n{unresolved_note}"
             try:
                 result = supabase.table("messages").insert({
                     "thread_id": thread_id,
@@ -1978,6 +2088,7 @@ async def respond_to_ai_mention(
                     resolved_map[orig] = res
 
             created_tasks = []
+            unresolved_assignee_names: List[str] = []
             for item, _ in new_items:
                 task_row = {
                     "workspace_id": workspace_id,
@@ -1996,10 +2107,12 @@ async def respond_to_ai_mention(
                 task_id = task["id"]
                 raw_assignees = item.get("assignees") or []
                 resolved_assignees = [resolved_map.get(n, {"display_name": n, "user_id": None}) for n in raw_assignees]
-                if resolved_assignees:
+                matched_assignees, unresolved_assignees = _partition_resolved_assignees(raw_assignees, resolved_assignees)
+                unresolved_assignee_names.extend(unresolved_assignees)
+                if matched_assignees:
                     supabase.table("task_assignees").insert([
                         {"task_id": task_id, "display_name": r["display_name"], "user_id": r["user_id"], "added_by": uid}
-                        for r in resolved_assignees
+                        for r in matched_assignees
                     ]).execute()
                 supabase.table("task_events").insert({
                     "task_id": task_id,
@@ -2007,7 +2120,8 @@ async def respond_to_ai_mention(
                     "actor_user_id": uid,
                     "payload": {
                         "title": task["title"],
-                        "assignees": [r["display_name"] for r in resolved_assignees],
+                        "assignees": [r["display_name"] for r in matched_assignees],
+                        "unresolved_assignees": unresolved_assignees,
                         "source": "extracted",
                     },
                 }).execute()
@@ -2032,6 +2146,9 @@ async def respond_to_ai_mention(
                 if n_dupes:
                     content += f" (skipped {n_dupes} duplicate(s))"
                 content += f":\n\n{markers}"
+                unresolved_note = _format_unresolved_assignee_note(unresolved_assignee_names)
+                if unresolved_note:
+                    content += f"\n\n{unresolved_note}"
             try:
                 result = supabase.table("messages").insert({
                     "thread_id": thread_id,
