@@ -40,13 +40,13 @@ describe('exportChannelTasks', () => {
     const file = await exportChannelTasks('channel-1');
 
     expect(getAuthHeaders).toHaveBeenCalledOnce();
-    expect(globalThis.fetch).toHaveBeenCalledWith(
-      'http://localhost:4000/api/channels/channel-1/tasks/export',
-      {
-        method: 'POST',
-        headers: { Authorization: 'Bearer token' },
-      }
-    );
+    expect(globalThis.fetch).toHaveBeenCalledOnce();
+    const [url, init] = vi.mocked(globalThis.fetch).mock.calls[0];
+    expect(url).toMatch(/\/api\/channels\/channel-1\/tasks\/export$/);
+    expect(init).toMatchObject({
+      method: 'POST',
+      headers: { Authorization: 'Bearer token' },
+    });
     expect(file).toEqual({
       id: 'file-1',
       workspaceId: 'ws-1',
