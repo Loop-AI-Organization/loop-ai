@@ -21,6 +21,28 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Validate required deploy secrets
+        env:
+          HETZNER_HOST: ${{ secrets.HETZNER_HOST }}
+          HETZNER_USER: ${{ secrets.HETZNER_USER }}
+          HETZNER_SSH_KEY: ${{ secrets.HETZNER_SSH_KEY }}
+          HETZNER_BACKEND_ENV: ${{ secrets.HETZNER_BACKEND_ENV }}
+        run: |
+          set -e
+          [ -n "$HETZNER_HOST" ] || { echo "Missing secret: HETZNER_HOST"; exit 1; }
+          [ -n "$HETZNER_USER" ] || { echo "Missing secret: HETZNER_USER"; exit 1; }
+          [ -n "$HETZNER_SSH_KEY" ] || { echo "Missing secret: HETZNER_SSH_KEY"; exit 1; }
+          [ -n "$HETZNER_BACKEND_ENV" ] || { echo "Missing secret: HETZNER_BACKEND_ENV"; exit 1; }
+
+          case "$HETZNER_SSH_KEY" in
+            *"BEGIN OPENSSH PRIVATE KEY"*|*"BEGIN RSA PRIVATE KEY"*|*"BEGIN EC PRIVATE KEY"*)
+              ;;
+            *)
+              echo "HETZNER_SSH_KEY is not a valid private key block (did you paste a .pub key?)"
+              exit 1
+              ;;
+          esac
+
       - name: Setup directories and env file on Hetzner
         uses: appleboy/ssh-action@v1.0.3
         with:
