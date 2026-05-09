@@ -722,10 +722,14 @@ def _format_task_due_date(value: Optional[str]) -> Optional[str]:
     return str(value)[:10]
 
 
+def _format_task_single_line(value: object) -> str:
+    return " ".join(str(value or "").split())
+
+
 def _format_task_assignees(task: Dict) -> List[str]:
     names: List[str] = []
     for assignee in task.get("task_assignees") or []:
-        name = (assignee.get("display_name") or "").strip()
+        name = _format_task_single_line(assignee.get("display_name"))
         if name:
             names.append(name)
     return names
@@ -755,10 +759,14 @@ def format_task_export_markdown(*, title: str, tasks: List[Dict]) -> str:
             if due_date:
                 metadata.append(f"Due: {due_date}")
             suffix = f" ({'; '.join(metadata)})" if metadata else ""
-            title_text = str(task.get("title") or "Untitled task").strip() or "Untitled task"
+            title_text = _format_task_single_line(task.get("title")) or "Untitled task"
             lines.append(f"- [{checkbox}] {title_text}{suffix}")
-            description = (task.get("description") or "").strip()
-            if description:
+            description_lines = [
+                line.strip()
+                for line in str(task.get("description") or "").splitlines()
+                if line.strip()
+            ]
+            for description in description_lines:
                 lines.append(f"  - {description}")
 
     return "\n".join(lines).strip() + "\n"

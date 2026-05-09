@@ -56,6 +56,26 @@ class TaskExportMarkdownTest(unittest.TestCase):
 
         self.assertEqual(content, "")
 
+    def test_normalizes_multiline_text_for_markdown_checklists(self):
+        content = format_task_export_markdown(
+            title="Task List",
+            tasks=[
+                {
+                    "title": "Fix export\nformatting",
+                    "status": "open",
+                    "description": "First line\nSecond line",
+                    "due_date": None,
+                    "task_assignees": [{"display_name": "Raeed\nSaad"}],
+                }
+            ],
+        )
+
+        self.assertIn("- [ ] Fix export formatting (Assignees: Raeed Saad)", content)
+        self.assertIn("  - First line", content)
+        self.assertIn("  - Second line", content)
+        self.assertNotIn("- [ ] Fix export\nformatting", content)
+        self.assertNotIn("Assignees: Raeed\nSaad", content)
+
 
 if __name__ == "__main__":
     unittest.main()
