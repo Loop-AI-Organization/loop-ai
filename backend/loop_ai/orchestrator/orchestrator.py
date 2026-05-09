@@ -526,12 +526,12 @@ _TASK_NOVELTY_PROMPT = """\
 You are a task deduplication classifier. Given a candidate task and a list of existing tasks, decide whether the candidate is new, a duplicate, or an update to an existing task.
 
 Reply ONLY with valid JSON:
-{
+{{
   "kind": "new" | "duplicate" | "update",
   "task_id": "<id of matching existing task, or null>",
   "suggested_status": "<new status for matched task, or null>",
   "reason": "<one sentence>"
-}
+}}
 
 Rules:
 - "duplicate": candidate is essentially the same work as an existing task (same intent, same scope)
