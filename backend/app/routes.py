@@ -824,7 +824,7 @@ async def list_channel_tasks(
 
 
 @router.post("/api/channels/{channel_id}/tasks/export")
-async def export_channel_tasks(
+def export_channel_tasks(
     channel_id: str,
     user: Annotated[dict, Depends(get_current_user)],
 ):
@@ -839,6 +839,17 @@ async def export_channel_tasks(
     if not _user_can_access_workspace(workspace_id, uid):
         raise HTTPException(status_code=403, detail="Not a member of this workspace")
 
+    confirmed_tasks = (
+        supabase.table("tasks")
+        .select("id")
+        .eq("channel_id", channel_id)
+        .neq("status", "proposed")
+        .limit(1)
+        .execute()
+    )
+    if not confirmed_tasks.data:
+        raise HTTPException(status_code=400, detail="No confirmed tasks available to export")
+
     generated = export_tasks_as_document(
         channel_id=channel_id,
         workspace_id=workspace_id,
@@ -846,7 +857,7 @@ async def export_channel_tasks(
         created_by=uid,
     )
     if not generated:
-        raise HTTPException(status_code=400, detail="No confirmed tasks available to export")
+        raise HTTPException(status_code=500, detail="Failed to export tasks")
     return {"file": generated}
 
 
