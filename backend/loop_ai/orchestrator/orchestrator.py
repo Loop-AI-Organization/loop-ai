@@ -890,6 +890,43 @@ def append_to_document_file(
     return updated_row.data[0] if updated_row.data else file_row
 
 
+def _guess_content_type(file_name: str) -> str:
+    """Guess content type from file extension."""
+    ext = file_name.lower().rsplit(".", 1)[-1] if "." in file_name else ""
+    mapping = {
+        "md": "text/markdown",
+        "markdown": "text/markdown",
+        "json": "application/json",
+        "xml": "application/xml",
+        "csv": "text/csv",
+        "ts": "application/typescript",
+        "js": "application/javascript",
+        "jsx": "application/javascript",
+        "tsx": "application/typescript",
+        "py": "text/x-python",
+        "css": "text/css",
+        "html": "text/html",
+        "yaml": "text/yaml",
+        "yml": "text/yaml",
+        "toml": "application/toml",
+        "ini": "text/ini",
+        "sh": "application/x-sh",
+        "bash": "application/x-sh",
+        "sql": "text/sql",
+        "svg": "image/svg+xml",
+        "png": "image/png",
+        "jpg": "image/jpeg",
+        "jpeg": "image/jpeg",
+        "gif": "image/gif",
+        "pdf": "application/pdf",
+        "zip": "application/zip",
+        "tar": "application/x-tar",
+        "gz": "application/gzip",
+        "txt": "text/plain",
+    }
+    return mapping.get(ext, "text/plain")
+
+
 def create_file_from_content(
     *,
     workspace_id: str,
@@ -908,12 +945,13 @@ def create_file_from_content(
     bucket = "workspace-files"
     safe_name = "".join(c if c.isalnum() or c in "._-" else "_" for c in file_name).strip()
     storage_path = f"{workspace_id}/files/{_uuid.uuid4()}-{safe_name}"
+    content_type = _guess_content_type(safe_name)
 
     try:
         supabase.storage.from_(bucket).upload(
             storage_path,
             file_content.encode("utf-8"),
-            {"content-type": "text/plain"},
+            {"content-type": content_type},
         )
     except Exception:
         return None
@@ -924,7 +962,7 @@ def create_file_from_content(
         "storage_path": storage_path,
         "file_name": safe_name,
         "file_size": len(file_content.encode("utf-8")),
-        "content_type": "text/plain",
+        "content_type": content_type,
         "created_by": created_by,
         "metadata_status": "ready",
         "summary": f"Created file: {safe_name}",
