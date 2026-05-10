@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
-import { X, Clock, Brain, File, ListChecks, FileText, Bookmark, BotOff, Download, Loader2 } from 'lucide-react';
+import { X, Clock, Brain, File, ListChecks, FileText, Bookmark, BotOff, Download, Loader2, Search } from 'lucide-react';
 import { useAppStore } from '@/store/app-store';
-import { fetchWorkspaceFiles, fetchChannelTasks, updateChannelSettings, exportChannelTasks, updateTaskViaApi } from '@/lib/supabase-data';
+import { fetchWorkspaceFiles, fetchChannelTasks, updateChannelSettings, exportChannelTasks, updateTaskViaApi, searchFiles, searchFilesAi } from '@/lib/supabase-data';
 import { getSupabase } from '@/lib/supabase';
 import type { Action, FileRecord, Task, TaskStatus } from '@/types';
 import { FileCard } from '@/components/file-card';
@@ -11,6 +11,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
+import { Input } from '@/components/ui/input';
 import { ActionChip } from './action-chip';
 import { cn } from '@/lib/utils';
 
@@ -30,6 +31,10 @@ export function InspectorPanel() {
     removeTask,
   } = useAppStore();
   const [workspaceFiles, setWorkspaceFiles] = useState<FileRecord[]>([]);
+  const [fileSearchQuery, setFileSearchQuery] = useState('');
+  const [fileSearchResults, setFileSearchResults] = useState<FileRecord[] | null>(null);
+  const [fileSearchLoading, setFileSearchLoading] = useState(false);
+  const [fileSearchAiMode, setFileSearchAiMode] = useState(false);
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [settingsError, setSettingsError] = useState<string | null>(null);
   const [exportingTasks, setExportingTasks] = useState(false);
@@ -116,6 +121,32 @@ export function InspectorPanel() {
     }).catch(() => {});
     return () => { cancelled = true; };
   }, [currentWorkspaceId]);
+
+  const handleFileSearch = async () => {
+    if (!currentWorkspaceId || !fileSearchQuery.trim()) {
+      setFileSearchResults(null);
+      return;
+    }
+    setFileSearchLoading(true);
+    try {
+      if (fileSearchAiMode) {
+        const response = await searchFilesAi(currentWorkspaceId, fileSearchQuery.trim());
+        setFileSearchResults(response.files);
+      } else {
+        const results = await searchFiles(currentWorkspaceId, fileSearchQuery.trim());
+        setFileSearchResults(results);
+      }
+    } catch {
+      setFileSearchResults([]);
+    } finally {
+      setFileSearchLoading(false);
+    }
+  };
+
+  const handleFileSearchClear = () => {
+    setFileSearchQuery('');
+    setFileSearchResults(null);
+  };
 
   // Load tasks for current channel + realtime subscription
   useEffect(() => {
@@ -453,10 +484,59 @@ export function InspectorPanel() {
           <TabsContent value="files" className="flex-1 m-0 overflow-hidden">
             <ScrollArea className="h-full">
               <div className="p-4 space-y-3">
-                <p className="text-xs text-muted-foreground">
-                  Files in this workspace.
-                </p>
-                {workspaceFiles.length === 0 ? (
+                {/* Search bar */}
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+                    <Input
+                      placeholder={fileSearchAiMode ? "Ask about files naturally..." : "Search files..."}
+                      value={fileSearchQuery}
+                      onChange={(e) => setFileSearchQuery(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && handleFileSearch()}
+                      className="pl-8 h-8 text-xs"
+                    />
+                  </div>
+                  <Button size="sm" variant="secondary" onClick={handleFileSearch} disabled={fileSearchLoading}>
+                    Search
+                  </Button>
+                  {fileSearchResults !== null && (
+                    <Button size="sm" variant="ghost" onClick={handleFileSearchClear}>
+                      Clear
+                    </Button>
+                  )}
+                  <Button
+                    size="sm"
+                    variant={fileSearchAiMode ? "default" : "outline"}
+                    onClick={() => setFileSearchAiMode(!fileSearchAiMode)}
+                    title={fileSearchAiMode ? "AI search enabled - click to disable" : "Enable AI-powered natural language search"}
+                  >
+                    AI
+                  </Button>
+                </div>
+
+                {/* Results info */}
+                {fileSearchResults !== null && (
+                  <p className="text-xs text-muted-foreground">
+                    {fileSearchResults.length > 0
+                      ? `Found ${fileSearchResults.length} file(s) matching "${fileSearchQuery}"`
+                      : `No files found matching "${fileSearchQuery}"`}
+                  </p>
+                )}
+
+                {/* File list - search results or all files */}
+                {fileSearchResults !== null ? (
+                  fileSearchResults.length === 0 ? (
+                    <div className="text-center py-8 text-muted-foreground text-sm">
+                      No files found
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {fileSearchResults.map((file) => (
+                        <FileCard key={file.id} file={file} />
+                      ))}
+                    </div>
+                  )
+                ) : workspaceFiles.length === 0 ? (
                   <div className="text-center py-8 text-muted-foreground text-sm">
                     No files yet
                   </div>
