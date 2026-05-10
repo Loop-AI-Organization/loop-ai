@@ -36,6 +36,7 @@ export function InspectorPanel() {
   const [taskExportMessage, setTaskExportMessage] = useState<string | null>(null);
   const [taskExportError, setTaskExportError] = useState<string | null>(null);
   const taskExportRequestIdRef = useRef(0);
+  const tabScrollViewportRef = useRef<HTMLDivElement | null>(null);
 
   const threadActions = currentChannelId ? actions : [];
   const currentChannel = channels.find((channel) => channel.id === currentChannelId) ?? null;
@@ -81,6 +82,19 @@ export function InspectorPanel() {
         setExportingTasks(false);
       }
     }
+  }
+
+  function handleTabStripWheel(event: React.WheelEvent<HTMLDivElement>) {
+    const viewport = tabScrollViewportRef.current;
+    if (!viewport) return;
+
+    const maxScroll = viewport.scrollWidth - viewport.clientWidth;
+    if (maxScroll <= 0) return;
+
+    event.preventDefault();
+    viewport.scrollLeft += Math.abs(event.deltaX) > Math.abs(event.deltaY)
+      ? event.deltaX
+      : event.deltaY;
   }
 
   useEffect(() => {
@@ -197,27 +211,36 @@ export function InspectorPanel() {
         {/* Tabs */}
         <Tabs defaultValue="context" className="flex-1 flex flex-col overflow-hidden">
           <TabsList className="w-full justify-start rounded-none border-b border-border bg-transparent h-10 px-2">
-            <TabsTrigger value="context" className="text-xs data-[state=active]:bg-muted">
-              <Brain className="w-3.5 h-3.5 mr-1.5" />
-              Context
-            </TabsTrigger>
-            <TabsTrigger value="actions" className="text-xs data-[state=active]:bg-muted">
-              <Clock className="w-3.5 h-3.5 mr-1.5" />
-              Actions
-            </TabsTrigger>
-            <TabsTrigger value="tasks" className="text-xs data-[state=active]:bg-muted">
-              <ListChecks className="w-3.5 h-3.5 mr-1.5" />
-              Tasks
-              {proposedTasks.length > 0 && (
-                <span className="ml-1 bg-primary text-primary-foreground text-2xs rounded-full px-1 min-w-[1rem] text-center leading-4">
-                  {proposedTasks.length}
-                </span>
-              )}
-            </TabsTrigger>
-            <TabsTrigger value="files" className="text-xs data-[state=active]:bg-muted">
-              <File className="w-3.5 h-3.5 mr-1.5" />
-              Files
-            </TabsTrigger>
+            <div
+              ref={tabScrollViewportRef}
+              className="relative -mx-2 flex-1 overflow-x-auto overflow-y-hidden overscroll-x-contain px-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+              onWheel={handleTabStripWheel}
+              aria-label="Inspector tabs"
+            >
+              <div className="flex w-max items-center gap-1 pr-2">
+                <TabsTrigger value="context" className="text-xs data-[state=active]:bg-muted">
+                  <Brain className="w-3.5 h-3.5 mr-1.5" />
+                  Context
+                </TabsTrigger>
+                <TabsTrigger value="actions" className="text-xs data-[state=active]:bg-muted">
+                  <Clock className="w-3.5 h-3.5 mr-1.5" />
+                  Actions
+                </TabsTrigger>
+                <TabsTrigger value="tasks" className="text-xs data-[state=active]:bg-muted">
+                  <ListChecks className="w-3.5 h-3.5 mr-1.5" />
+                  Tasks
+                  {proposedTasks.length > 0 && (
+                    <span className="ml-1 bg-primary text-primary-foreground text-2xs rounded-full px-1 min-w-[1rem] text-center leading-4">
+                      {proposedTasks.length}
+                    </span>
+                  )}
+                </TabsTrigger>
+                <TabsTrigger value="files" className="text-xs data-[state=active]:bg-muted">
+                  <File className="w-3.5 h-3.5 mr-1.5" />
+                  Files
+                </TabsTrigger>
+              </div>
+            </div>
           </TabsList>
 
           {/* Always-visible AI controls */}
