@@ -352,20 +352,6 @@ async def search_files_api(
     return {"files": [f for _, f in scored[:10]]}
 
 
-<<<<<<< HEAD
-@router.post("/api/files/query/stream")
-async def query_files_stream_endpoint(
-    body: FileQueryRequest,
-    user: Annotated[dict, Depends(get_current_user)],
-):
-    """
-    Stream an answer to a natural language question about selected files.
-    Reads file contents from storage and uses LLM to answer (streaming).
-    """
-    uid = user.get("sub")
-    if not uid:
-        raise HTTPException(status_code=401, detail="Invalid user")
-=======
 @router.post("/api/files/search/ai")
 async def search_files_ai(
     body: FileSearchAiRequest,

@@ -925,7 +925,6 @@ def detect_file_query_intent(*, messages: List[Dict[str, str]]) -> Dict:
         return {"is_query_intent": False, "query": None}
 
 
->>>>>>> b3ecb39 (fix: add logging for file read errors and increase max tokens)
 def _format_task_due_date(value: Optional[str]) -> Optional[str]:
     if not value:
         return None
