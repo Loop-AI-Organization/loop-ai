@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import { X, Clock, Brain, File, ListChecks, FileText, Bookmark, BotOff, Download, Loader2 } from 'lucide-react';
 import { useAppStore } from '@/store/app-store';
-import { fetchWorkspaceFiles, fetchChannelTasks, updateChannelSettings, exportChannelTasks } from '@/lib/supabase-data';
+import { fetchWorkspaceFiles, fetchChannelTasks, updateChannelSettings, exportChannelTasks, updateTaskViaApi } from '@/lib/supabase-data';
 import { getSupabase } from '@/lib/supabase';
-import type { Action, FileRecord, Task } from '@/types';
+import type { Action, FileRecord, Task, TaskStatus } from '@/types';
 import { FileCard } from '@/components/file-card';
 import { TaskCard } from '@/components/task-card';
 import { Button } from '@/components/ui/button';
@@ -37,6 +37,7 @@ export function InspectorPanel() {
   const [taskExportError, setTaskExportError] = useState<string | null>(null);
   const taskExportRequestIdRef = useRef(0);
   const tabScrollViewportRef = useRef<HTMLDivElement | null>(null);
+  const [dragOverStatus, setDragOverStatus] = useState<TaskStatus | null>(null);
 
   const threadActions = currentChannelId ? actions : [];
   const currentChannel = channels.find((channel) => channel.id === currentChannelId) ?? null;
@@ -183,6 +184,43 @@ export function InspectorPanel() {
   const proposedTasks = channelTasks.filter((t) => t.status === 'proposed');
   const activeTasks = channelTasks.filter((t) => t.status !== 'proposed');
   const canExportTasks = activeTasks.length > 0;
+
+  const BOARD_COLUMNS: { status: TaskStatus; label: string; colorClass: string; headerClass: string }[] = [
+    { status: 'open', label: 'Open', colorClass: 'border-blue-500/30', headerClass: 'bg-blue-500/10 text-blue-600 dark:text-blue-400' },
+    { status: 'in_progress', label: 'In Progress', colorClass: 'border-amber-500/30', headerClass: 'bg-amber-500/10 text-amber-600 dark:text-amber-400' },
+    { status: 'blocked', label: 'Blocked', colorClass: 'border-red-500/30', headerClass: 'bg-red-500/10 text-red-600 dark:text-red-400' },
+    { status: 'done', label: 'Done', colorClass: 'border-green-500/30', headerClass: 'bg-green-500/10 text-green-600 dark:text-green-400' },
+  ];
+
+  function handleDragStart(e: React.DragEvent<HTMLDivElement>, taskId: string) {
+    e.dataTransfer.setData('taskId', taskId);
+    e.dataTransfer.effectAllowed = 'move';
+  }
+
+  function handleDragOver(e: React.DragEvent<HTMLDivElement>, status: TaskStatus) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    setDragOverStatus(status);
+  }
+
+  function handleDragLeave() {
+    setDragOverStatus(null);
+  }
+
+  async function handleDrop(e: React.DragEvent<HTMLDivElement>, targetStatus: TaskStatus) {
+    e.preventDefault();
+    setDragOverStatus(null);
+    const taskId = e.dataTransfer.getData('taskId');
+    if (!taskId) return;
+    const task = tasks.find((t) => t.id === taskId);
+    if (!task || task.status === targetStatus) return;
+    try {
+      const updated = await updateTaskViaApi(taskId, { status: targetStatus });
+      upsertTask(updated);
+    } catch (err) {
+      console.error('Failed to move task:', err);
+    }
+  }
 
   if (!isInspectorOpen) return null;
 
@@ -360,15 +398,49 @@ export function InspectorPanel() {
                       </div>
                     )}
                     {activeTasks.length > 0 && (
-                      <div className="space-y-1.5">
+                      <div className="space-y-2">
                         {proposedTasks.length > 0 && (
                           <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
                             Board
                           </p>
                         )}
-                        {activeTasks.map((task) => (
-                          <TaskCard key={task.id} task={task} compact />
-                        ))}
+                        {BOARD_COLUMNS.map(({ status, label, colorClass, headerClass }) => {
+                          const columnTasks = activeTasks.filter((t) => t.status === status);
+                          const isOver = dragOverStatus === status;
+                          return (
+                            <div
+                              key={status}
+                              onDragOver={(e) => handleDragOver(e, status)}
+                              onDragLeave={handleDragLeave}
+                              onDrop={(e) => handleDrop(e, status)}
+                              className={cn(
+                                'rounded-lg border transition-colors',
+                                colorClass,
+                                isOver && 'ring-2 ring-primary/40 bg-primary/5'
+                              )}
+                            >
+                              <div className={cn('flex items-center justify-between px-2.5 py-1.5 rounded-t-lg', headerClass)}>
+                                <span className="text-xs font-semibold uppercase tracking-wide">{label}</span>
+                                <span className="text-xs opacity-70">{columnTasks.length}</span>
+                              </div>
+                              <div className="px-1.5 pb-1.5 min-h-[2rem]">
+                                {columnTasks.length === 0 ? (
+                                  <p className="text-center text-2xs text-muted-foreground py-2">Drop tasks here</p>
+                                ) : (
+                                  columnTasks.map((task) => (
+                                    <TaskCard
+                                      key={task.id}
+                                      task={task}
+                                      compact
+                                      draggable
+                                      onDragStart={handleDragStart}
+                                    />
+                                  ))
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
                     )}
                   </>

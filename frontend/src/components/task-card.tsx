@@ -59,9 +59,11 @@ function AssigneeAvatar({ displayName }: { displayName: string }) {
 interface TaskCardProps {
   task: Task;
   compact?: boolean;
+  draggable?: boolean;
+  onDragStart?: (e: React.DragEvent<HTMLDivElement>, taskId: string) => void;
 }
 
-export function TaskCard({ task, compact = false }: TaskCardProps) {
+export function TaskCard({ task, compact = false, draggable: isDraggable = false, onDragStart }: TaskCardProps) {
   const { upsertTask, removeTask } = useAppStore();
   const [busy, setBusy] = useState<'confirm' | 'reject' | 'status' | null>(null);
 
@@ -105,11 +107,14 @@ export function TaskCard({ task, compact = false }: TaskCardProps) {
 
   return (
     <div
+      draggable={isDraggable}
+      onDragStart={isDraggable && onDragStart ? (e) => onDragStart(e, task.id) : undefined}
       className={cn(
         'rounded-lg border bg-muted/30 my-1',
         isProposed && 'border-dashed border-primary/40 bg-primary/5',
         !isProposed && 'border-border',
-        compact ? 'p-2.5' : 'p-3'
+        compact ? 'p-2.5' : 'p-3',
+        isDraggable && 'cursor-grab active:cursor-grabbing active:opacity-60'
       )}
     >
       <div className="flex items-start gap-2.5">
