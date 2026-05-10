@@ -889,11 +889,12 @@ export async function triageAndRespond(
   channelId: string,
   messages: Array<{ role: string; content: string }>
 ): Promise<TriageResult> {
+  const threadId = await getOrCreateChannelThreadId(channelId);
   const headers = await getAuthHeaders();
   const res = await fetch(`${API_URL}/api/channels/${channelId}/triage`, {
     method: 'POST',
     headers,
-    body: JSON.stringify({ channel_id: channelId, messages }),
+    body: JSON.stringify({ channel_id: channelId, thread_id: threadId, messages }),
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
