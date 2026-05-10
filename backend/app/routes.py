@@ -271,6 +271,82 @@ async def append_to_file(
     return {"file": updated_file}
 
 
+class FileSearchRequest(BaseModel):
+    workspace_id: str
+    query: Optional[str] = None
+    content_type_filter: Optional[str] = None
+
+
+@router.post("/api/files/search")
+async def search_files_api(
+    body: FileSearchRequest,
+    user: Annotated[dict, Depends(get_current_user)],
+):
+    """Search files in a workspace using natural language queries."""
+    uid = user.get("sub")
+    if not uid:
+        raise HTTPException(status_code=401, detail="Invalid user")
+
+    # Verify workspace access
+    ws = (
+        supabase.table("workspaces")
+        .select("id, user_id")
+        .eq("id", body.workspace_id)
+        .execute()
+    )
+    if not ws.data:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+    owner_id = ws.data[0].get("user_id")
+    if owner_id != uid:
+        members = (
+            supabase.table("workspace_members")
+            .select("user_id")
+            .eq("workspace_id", body.workspace_id)
+            .eq("user_id", uid)
+            .execute()
+        )
+        if not members.data:
+            raise HTTPException(status_code=403, detail="Not a member of this workspace")
+
+    # Perform the search
+    q = supabase.table("files").select("*").eq("workspace_id", body.workspace_id)
+
+    if body.content_type_filter:
+        q = q.ilike("content_type", f"%{body.content_type_filter}%")
+
+    result = q.order("created_at", desc=True).limit(50).execute()
+    files = result.data or []
+
+    if not body.query:
+        return {"files": files[:10]}
+
+    query_lower = body.query.lower()
+    query_words = query_lower.split()
+
+    def score_file(f: dict) -> int:
+        s = 0
+        name = (f.get("file_name") or "").lower()
+        summary = (f.get("summary") or "").lower()
+        context = (f.get("project_context") or "").lower()
+        tags = [t.lower() for t in (f.get("tags") or [])]
+
+        for word in query_words:
+            if word in name:
+                s += 10
+            if any(word in tag for tag in tags):
+                s += 7
+            if word in summary:
+                s += 5
+            if word in context:
+                s += 3
+        return s
+
+    scored = [(score_file(f), f) for f in files]
+    scored = [(s, f) for s, f in scored if s > 0]
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return {"files": [f for _, f in scored[:10]]}
+
+
 @router.post("/api/files/query/stream")
 async def query_files_stream_endpoint(
     body: FileQueryRequest,
@@ -312,7 +388,6 @@ async def query_files_stream_endpoint(
             .select("user_id")
             .eq("workspace_id", workspace_id)
             .eq("user_id", uid)
-            .limit(1)
             .execute()
         )
         if not members.data:
