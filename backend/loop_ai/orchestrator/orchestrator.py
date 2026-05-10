@@ -207,19 +207,21 @@ def generate_full_response(*, messages: List[Dict[str, str]]) -> str:
 
 
 _FILE_INTENT_DETECT_PROMPT = """\
-You are a file intent detector. Decide if the user wants to find files, create a document, export tasks, or append content to an existing document.
+You are a file intent detector. Decide if the user wants to find files, create a document, export tasks, append content to an existing document, or create a new file from scratch.
 
 IMPORTANT: Do NOT classify as a file intent if the user wants to extract action items or tasks as trackable to-do items (that is a task intent, not a file intent). Only classify as "create_document" when the user explicitly wants a written document, summary, or report — not when they want to track tasks.
 
 Reply ONLY with valid JSON:
 {
   "is_file_intent": true/false,
-  "intent_type": "find_file" | "create_document" | "export_tasks" | "append_to_document" | "none",
+  "intent_type": "find_file" | "create_document" | "export_tasks" | "append_to_document" | "create_file" | "none",
   "query": "<search query for find_file, or null>",
   "doc_title": "<new document title or appended section title, or null>",
   "time_range_days": <number or null>,
   "instructions": "<what to extract or summarize, or null>",
-  "target_file_query": "<name/description of the existing file to append to, or null>"
+  "target_file_query": "<name/description of the existing file to append to, or null>",
+  "file_content": "<actual file content to store (for create_file only), or null>",
+  "file_name": "<desired file name with extension (for create_file only), or null>"
 }
 
 Examples:
@@ -233,8 +235,11 @@ Examples:
 - "append a task summary to the sprint doc" -> append_to_document, target_file_query="sprint", doc_title="Task Summary"
 - "extract action items from last 2 days" -> NOT a file intent (is_file_intent=false) — this is a task intent
 - "pull out the tasks from this week" -> NOT a file intent (is_file_intent=false) — this is a task intent
+- "create a new file called test.py with def hello: pass" -> create_file, file_name="test.py", file_content="def hello:\\n    pass"
+- "create a file README.md with the text Hello World" -> create_file, file_name="README.md", file_content="Hello World"
+- "make a new file config.json" -> create_file, file_name="config.json"
 
-If not a file intent, return {"is_file_intent": false, "intent_type": "none", "query": null, "doc_title": null, "time_range_days": null, "instructions": null, "target_file_query": null}.\
+If not a file intent, return {"is_file_intent": false, "intent_type": "none", "query": null, "doc_title": null, "time_range_days": null, "instructions": null, "target_file_query": null, "file_content": null, "file_name": null}.\
 """
 
 
@@ -262,6 +267,8 @@ def detect_file_intent(*, messages: List[Dict[str, str]]) -> Dict:
             "time_range_days": result.get("time_range_days"),
             "instructions": result.get("instructions"),
             "target_file_query": result.get("target_file_query"),
+            "file_content": result.get("file_content"),
+            "file_name": result.get("file_name"),
         }
     except Exception:
         return {
@@ -272,6 +279,8 @@ def detect_file_intent(*, messages: List[Dict[str, str]]) -> Dict:
             "time_range_days": None,
             "instructions": None,
             "target_file_query": None,
+            "file_content": None,
+            "file_name": None,
         }
 
 
@@ -879,6 +888,52 @@ def append_to_document_file(
     }).eq("id", file_id).execute()
 
     return updated_row.data[0] if updated_row.data else file_row
+
+
+def create_file_from_content(
+    *,
+    workspace_id: str,
+    file_name: str,
+    file_content: str,
+    created_by: str,
+    source_channel_id: Optional[str] = None,
+) -> Optional[Dict]:
+    """
+    Store a raw file (text or code) directly in Supabase storage and create a files row.
+    Returns the file record dict or None on failure.
+    """
+    from app.supabase_client import supabase
+    import uuid as _uuid
+
+    bucket = "workspace-files"
+    safe_name = "".join(c if c.isalnum() or c in "._-" else "_" for c in file_name).strip()
+    storage_path = f"{workspace_id}/files/{_uuid.uuid4()}-{safe_name}"
+
+    try:
+        supabase.storage.from_(bucket).upload(
+            storage_path,
+            file_content.encode("utf-8"),
+            {"content-type": "text/plain"},
+        )
+    except Exception:
+        return None
+
+    row = {
+        "workspace_id": workspace_id,
+        "source": "generated",
+        "storage_path": storage_path,
+        "file_name": safe_name,
+        "file_size": len(file_content.encode("utf-8")),
+        "content_type": "text/plain",
+        "created_by": created_by,
+        "metadata_status": "ready",
+        "summary": f"Created file: {safe_name}",
+        "tags": ["created"],
+        "project_context": "Created via prompt",
+        "source_channel_id": source_channel_id,
+    }
+    result = supabase.table("files").insert(row).execute()
+    return result.data[0] if result.data else None
 
 
 _DOCUMENT_GEN_PROMPT = """\

@@ -29,6 +29,7 @@ from loop_ai.orchestrator.orchestrator import (
     export_tasks_as_document,
     append_to_document_file,
     detect_doc_or_task_ambiguity,
+    create_file_from_content,
 )
 from loop_ai.tasks.assignee_resolver import resolve_assignees
 
@@ -1561,6 +1562,53 @@ async def respond_to_ai_mention(
                 }
             else:
                 content = "I couldn't generate the document — there may not be enough messages in the specified time range."
+                return {"should_respond": True, "content": content}
+
+    if file_intent.get("is_file_intent") and file_intent.get("intent_type") == "create_file":
+        ch_res = supabase.table("channels").select("workspace_id").eq("id", channel_id).execute()
+        workspace_id = ch_res.data[0]["workspace_id"] if ch_res.data else None
+        if workspace_id:
+            file_name = file_intent.get("file_name") or "untitled.txt"
+            file_content = file_intent.get("file_content") or ""
+            if not file_content:
+                content = "I couldn't create that file — no content was provided."
+                return {"should_respond": True, "content": content}
+
+            wid = workspace_id
+            fn = file_name
+            fc = file_content
+            cb = uid
+            cid = channel_id
+            generated = await loop.run_in_executor(
+                None,
+                lambda w=wid, f=fn, c=fc, u=cb, ch=cid: create_file_from_content(
+                    workspace_id=w,
+                    file_name=f,
+                    file_content=c,
+                    created_by=u,
+                    source_channel_id=ch,
+                ),
+            )
+            if generated:
+                file_marker = f':::file{{id="{generated["id"]}"}}'
+                content = f'I created "{file_name}":\n\n{file_marker}'
+                try:
+                    result = supabase.table("messages").insert({
+                        "thread_id": thread_id,
+                        "role": "assistant",
+                        "content": content,
+                    }).execute()
+                    saved = result.data[0] if result.data else None
+                except Exception:
+                    saved = None
+                return {
+                    "should_respond": True,
+                    "message_id": saved["id"] if saved else None,
+                    "content": content,
+                    "files": [generated],
+                }
+            else:
+                content = "I couldn't create that file. Please try again."
                 return {"should_respond": True, "content": content}
 
     if file_intent.get("is_file_intent") and file_intent.get("intent_type") == "export_tasks":
