@@ -4,7 +4,7 @@ import json
 from typing import Dict, Iterator, List, Optional
 
 from loop_ai.config import load_settings
-from loop_ai.llm.openrouter_client import stream_chat_completions, chat_completion
+from loop_ai.llm.openrouter_client import stream_chat_completions, chat_completion, OpenRouterDelta
 
 
 TRIAGE_SYSTEM_PROMPT = (
