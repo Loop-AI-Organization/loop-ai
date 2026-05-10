@@ -812,6 +812,27 @@ export async function searchFiles(
   return (body.files as FileRow[]).map(toFileRecord);
 }
 
+export async function searchFilesAi(
+  workspaceId: string,
+  query: string
+): Promise<{ files: FileRecord[]; intent: { is_file_intent: boolean; intent_type: string; query: string | null } }> {
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${API_URL}/api/files/search/ai`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      workspace_id: workspaceId,
+      query,
+    }),
+  });
+  if (!res.ok) throw new Error('Failed to search files');
+  const body = await res.json();
+  return {
+    files: (body.files as FileRow[]).map(toFileRecord),
+    intent: body.intent,
+  };
+}
+
 export async function exportChannelTasks(channelId: string): Promise<FileRecord> {
   const headers = await getAuthHeaders();
   const res = await fetch(`${API_URL}/api/channels/${channelId}/tasks/export`, {

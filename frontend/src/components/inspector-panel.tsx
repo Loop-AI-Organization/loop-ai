@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { X, Clock, Brain, File, ListChecks, FileText, Bookmark, BotOff, Download, Loader2, Search } from 'lucide-react';
 import { useAppStore } from '@/store/app-store';
-import { fetchWorkspaceFiles, fetchChannelTasks, updateChannelSettings, exportChannelTasks, updateTaskViaApi, searchFiles } from '@/lib/supabase-data';
+import { fetchWorkspaceFiles, fetchChannelTasks, updateChannelSettings, exportChannelTasks, updateTaskViaApi, searchFiles, searchFilesAi } from '@/lib/supabase-data';
 import { getSupabase } from '@/lib/supabase';
 import type { Action, FileRecord, Task, TaskStatus } from '@/types';
 import { FileCard } from '@/components/file-card';
@@ -34,6 +34,7 @@ export function InspectorPanel() {
   const [fileSearchQuery, setFileSearchQuery] = useState('');
   const [fileSearchResults, setFileSearchResults] = useState<FileRecord[] | null>(null);
   const [fileSearchLoading, setFileSearchLoading] = useState(false);
+  const [fileSearchAiMode, setFileSearchAiMode] = useState(false);
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [settingsError, setSettingsError] = useState<string | null>(null);
   const [exportingTasks, setExportingTasks] = useState(false);
@@ -128,8 +129,13 @@ export function InspectorPanel() {
     }
     setFileSearchLoading(true);
     try {
-      const results = await searchFiles(currentWorkspaceId, fileSearchQuery.trim());
-      setFileSearchResults(results);
+      if (fileSearchAiMode) {
+        const response = await searchFilesAi(currentWorkspaceId, fileSearchQuery.trim());
+        setFileSearchResults(response.files);
+      } else {
+        const results = await searchFiles(currentWorkspaceId, fileSearchQuery.trim());
+        setFileSearchResults(results);
+      }
     } catch {
       setFileSearchResults([]);
     } finally {
@@ -483,7 +489,7 @@ export function InspectorPanel() {
                   <div className="relative flex-1">
                     <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
                     <Input
-                      placeholder="Search files..."
+                      placeholder={fileSearchAiMode ? "Ask about files naturally..." : "Search files..."}
                       value={fileSearchQuery}
                       onChange={(e) => setFileSearchQuery(e.target.value)}
                       onKeyDown={(e) => e.key === 'Enter' && handleFileSearch()}
@@ -498,6 +504,14 @@ export function InspectorPanel() {
                       Clear
                     </Button>
                   )}
+                  <Button
+                    size="sm"
+                    variant={fileSearchAiMode ? "default" : "outline"}
+                    onClick={() => setFileSearchAiMode(!fileSearchAiMode)}
+                    title={fileSearchAiMode ? "AI search enabled - click to disable" : "Enable AI-powered natural language search"}
+                  >
+                    AI
+                  </Button>
                 </div>
 
                 {/* Results info */}

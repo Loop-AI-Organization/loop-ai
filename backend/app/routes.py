@@ -277,12 +277,17 @@ class FileSearchRequest(BaseModel):
     content_type_filter: Optional[str] = None
 
 
+class FileSearchAiRequest(BaseModel):
+    workspace_id: str
+    query: str  # natural language query
+
+
 @router.post("/api/files/search")
 async def search_files_api(
     body: FileSearchRequest,
     user: Annotated[dict, Depends(get_current_user)],
 ):
-    """Search files in a workspace using natural language queries."""
+    """Search files in a workspace using keyword matching."""
     uid = user.get("sub")
     if not uid:
         raise HTTPException(status_code=401, detail="Invalid user")
@@ -347,6 +352,7 @@ async def search_files_api(
     return {"files": [f for _, f in scored[:10]]}
 
 
+<<<<<<< HEAD
 @router.post("/api/files/query/stream")
 async def query_files_stream_endpoint(
     body: FileQueryRequest,
@@ -359,70 +365,73 @@ async def query_files_stream_endpoint(
     uid = user.get("sub")
     if not uid:
         raise HTTPException(status_code=401, detail="Invalid user")
+=======
+@router.post("/api/files/search/ai")
+async def search_files_ai(
+    body: FileSearchAiRequest,
+    user: Annotated[dict, Depends(get_current_user)],
+):
+    """Search files using LLM-powered natural language understanding."""
+    uid = user.get("sub")
+    if not uid:
+        raise HTTPException(status_code=401, detail="Invalid user")
 
-    if not body.file_ids:
-        raise HTTPException(status_code=400, detail="At least one file_id is required")
+    if not body.query or not body.query.strip():
+        raise HTTPException(status_code=400, detail="query is required")
 
-    workspace_id: Optional[str] = None
-    for fid in body.file_ids:
-        file_res = (
-            supabase.table("files")
-            .select("id, workspace_id")
-            .eq("id", fid)
-            .limit(1)
-            .execute()
-        )
-        if file_res.data:
-            workspace_id = file_res.data[0].get("workspace_id")
-            break
-
-    if not workspace_id:
-        raise HTTPException(status_code=404, detail="Files not found")
-
-    ws = supabase.table("workspaces").select("id, user_id").eq("id", workspace_id).execute()
+    # Verify workspace access
+    ws = (
+        supabase.table("workspaces")
+        .select("id, user_id")
+        .eq("id", body.workspace_id)
+        .execute()
+    )
     if not ws.data:
         raise HTTPException(status_code=404, detail="Workspace not found")
-    if ws.data[0]["user_id"] != uid:
+    owner_id = ws.data[0].get("user_id")
+    if owner_id != uid:
         members = (
             supabase.table("workspace_members")
             .select("user_id")
-            .eq("workspace_id", workspace_id)
+            .eq("workspace_id", body.workspace_id)
             .eq("user_id", uid)
             .execute()
         )
         if not members.data:
             raise HTTPException(status_code=403, detail="Not a member of this workspace")
 
-    async def event_stream():
-        loop = asyncio.get_running_loop()
-        q = asyncio.Queue()
+    loop = asyncio.get_running_loop()
 
-        def run_gen():
-            try:
-                for delta in query_files_stream(file_ids=body.file_ids, question=body.question):
-                    asyncio.run_coroutine_threadsafe(q.put(delta.content), loop)
-            except Exception as exc:
-                asyncio.run_coroutine_threadsafe(q.put(f"[error: {exc}]"), loop)
-            finally:
-                asyncio.run_coroutine_threadsafe(q.put(None), loop)
-
-        loop.run_in_executor(None, run_gen)
-
-        while True:
-            content = await q.get()
-            if content is None:
-                break
-            if content.startswith("[error:"):
-                yield f"data: {json.dumps({'error': content})}\n\n"
-            else:
-                yield f"data: {json.dumps({'token': content})}\n\n"
-
-    from fastapi.responses import StreamingResponse
-    return StreamingResponse(
-        event_stream(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache"},
+    # Use detect_file_intent to interpret the natural language query
+    file_intent = await loop.run_in_executor(
+        None,
+        lambda: detect_file_intent(
+            messages=[{"role": "user", "content": body.query}]
+        ),
     )
+
+    # Only handle find_file intent for search
+    if not file_intent.get("is_file_intent") or file_intent.get("intent_type") != "find_file":
+        # Not a file find intent - try simple keyword search as fallback
+        search_query = body.query
+    else:
+        # Use the interpreted query from LLM
+        search_query = file_intent.get("query") or body.query
+
+    # Perform the search using the orchestrator's search_files
+    found_files = await loop.run_in_executor(
+        None,
+        lambda: search_files(workspace_id=body.workspace_id, query=search_query),
+    )
+
+    return {
+        "files": found_files,
+        "intent": {
+            "is_file_intent": file_intent.get("is_file_intent"),
+            "intent_type": file_intent.get("intent_type"),
+            "query": file_intent.get("query"),
+        },
+    }
 
 
 class LogEventRequest(BaseModel):
