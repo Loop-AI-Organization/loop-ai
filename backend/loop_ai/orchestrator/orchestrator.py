@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Dict, Iterator, List, Optional
 
 from loop_ai.config import load_settings
+
+logger = logging.getLogger(__name__)
 from loop_ai.llm.openrouter_client import stream_chat_completions, chat_completion, OpenRouterDelta
 
 
@@ -725,6 +728,204 @@ _TASK_EXPORT_STATUS_LABELS = {
 }
 
 
+def query_files(
+    *,
+    file_ids: List[str],
+    question: str,
+) -> Dict:
+    """
+    Answer a natural language question about selected files.
+    Downloads file content from Supabase storage and uses LLM to answer.
+
+    Returns {"answer": str, "files": [{"id": str, "name": str}], "error": str or None}.
+    """
+    from app.supabase_client import supabase
+
+    if not file_ids:
+        return {"answer": "", "files": [], "error": "No files selected"}
+
+    if not question.strip():
+        return {"answer": "", "files": [], "error": "No question provided"}
+
+    settings = load_settings()
+
+    # Fetch file records
+    file_res = supabase.table("files").select("id, file_name, storage_path, content_type").in_("id", file_ids).execute()
+    file_rows = file_res.data or []
+    if not file_rows:
+        return {"answer": "", "files": [], "error": "Files not found"}
+
+    bucket = "workspace-files"
+    file_contents: List[Dict] = []
+
+    for f in file_rows:
+        storage_path = f.get("storage_path")
+        if not storage_path:
+            continue
+        try:
+            bytes_data = supabase.storage.from_(bucket).download(storage_path)
+            text = bytes_data.decode("utf-8", errors="ignore")
+            # Truncate very long files to avoid token limits
+            max_chars = 50000
+            if len(text) > max_chars:
+                text = text[:max_chars] + f"\n\n[... File truncated at {max_chars} characters ...]"
+            file_contents.append({
+                "id": f["id"],
+                "name": f.get("file_name", "unknown"),
+                "content": text,
+            })
+        except Exception as exc:
+            logger.warning("query_files: failed to read file id=%s path=%s error=%s", f["id"], storage_path, exc)
+            # If we can't read a file, skip it but continue
+            file_contents.append({
+                "id": f["id"],
+                "name": f.get("file_name", "unknown"),
+                "content": "",
+            })
+
+    if not file_contents or not any(f["content"] for f in file_contents):
+        return {"answer": "", "files": [{"id": f["id"], "name": f.get("file_name", "unknown")} for f in file_rows], "error": "Could not read any file contents"}
+
+    # Build context from file contents
+    context_parts = []
+    for f in file_contents:
+        context_parts.append(f"--- File: {f['name']} ---\n{f['content']}")
+    context = "\n\n".join(context_parts)
+
+    prompt = (
+        "You are a helpful assistant answering questions about provided documents.\n\n"
+        "Answer the user's question based ONLY on the document content provided below.\n"
+        "If the answer is not in the documents, say so clearly.\n"
+        "Be specific and cite which file(s) contain the relevant information.\n\n"
+        f"Question: {question}\n\n"
+        f"Document(s):\n{context}\n\n"
+        "Answer:"
+    )
+
+    answer = chat_completion(
+        settings=settings,
+        messages=[{"role": "user", "content": prompt}],
+        model=settings.openrouter_response_model,
+        max_tokens=2048,
+        temperature=0.3,
+        timeout=120.0,
+    ).strip()
+
+    files_summary = [{"id": f["id"], "name": f.get("file_name", "unknown")} for f in file_rows]
+
+    return {"answer": answer, "files": files_summary, "error": None}
+
+
+def query_files_stream(
+    *,
+    file_ids: List[str],
+    question: str,
+) -> Iterator[OpenRouterDelta]:
+    """
+    Streaming version of query_files. Yields content deltas.
+    """
+    from app.supabase_client import supabase
+
+    if not file_ids or not question.strip():
+        return
+
+    settings = load_settings()
+
+    file_res = supabase.table("files").select("id, file_name, storage_path").in_("id", file_ids).execute()
+    file_rows = file_res.data or []
+    if not file_rows:
+        return
+
+    bucket = "workspace-files"
+    file_contents: List[Dict] = []
+
+    for f in file_rows:
+        storage_path = f.get("storage_path")
+        if not storage_path:
+            continue
+        try:
+            bytes_data = supabase.storage.from_(bucket).download(storage_path)
+            text = bytes_data.decode("utf-8", errors="ignore")
+            max_chars = 50000
+            if len(text) > max_chars:
+                text = text[:max_chars] + f"\n\n[... File truncated at {max_chars} characters ...]"
+            file_contents.append({"id": f["id"], "name": f.get("file_name", "unknown"), "content": text})
+        except Exception as exc:
+            logger.warning("query_files_stream: failed to read file id=%s path=%s error=%s", f["id"], storage_path, exc)
+            file_contents.append({"id": f["id"], "name": f.get("file_name", "unknown"), "content": ""})
+
+    if not file_contents or not any(f["content"] for f in file_contents):
+        return
+
+    context_parts = []
+    for f in file_contents:
+        context_parts.append(f"--- File: {f['name']} ---\n{f['content']}")
+    context = "\n\n".join(context_parts)
+
+    prompt = (
+        "You are a helpful assistant answering questions about provided documents.\n\n"
+        "Answer the user's question based ONLY on the document content provided below.\n"
+        "If the answer is not in the documents, say so clearly.\n"
+        "Be specific and cite which file(s) contain the relevant information.\n\n"
+        f"Question: {question}\n\n"
+        f"Document(s):\n{context}\n\n"
+        "Answer:"
+    )
+
+    for delta in stream_chat_completions(
+        settings=settings,
+        messages=[{"role": "user", "content": prompt}],
+        max_tokens=2048,
+    ):
+        yield delta
+
+
+_FILE_QUERY_PROMPT = """\
+You are a file query intent detector. Decide if the user is asking a question ABOUT files they have selected.
+
+Reply ONLY with valid JSON:
+{{"is_query_intent": true/false, "query": "<the actual question they are asking, or null>"}}
+
+Examples:
+- "what's in this file?" -> is_query_intent=true, query="what's in this file?"
+- "summarize these docs" -> is_query_intent=true, query="summarize these docs"
+- "find the design doc" -> is_query_intent=false (that's a find intent, not a query)
+- "create a summary doc" -> is_query_intent=false (that's a create intent)
+- "tell me about the budget numbers" -> is_query_intent=true, query="tell me about the budget numbers"
+- "what does the API spec say about auth?" -> is_query_intent=true, query="what does the API spec say about auth?"
+
+If not asking about the content of selected files, return {{"is_query_intent": false, "query": null}}.\
+"""
+
+
+def detect_file_query_intent(*, messages: List[Dict[str, str]]) -> Dict:
+    """
+    Detect if the user is asking a question about selected files.
+    Returns {"is_query_intent": bool, "query": str | None}.
+    """
+    settings = load_settings()
+    msgs = [
+        {"role": "system", "content": _FILE_QUERY_PROMPT},
+        *messages[-3:],
+    ]
+    raw = chat_completion(
+        settings=settings,
+        messages=msgs,
+        model=settings.openrouter_triage_model,
+        max_tokens=80,
+        temperature=0.0,
+    )
+    try:
+        result = json.loads(raw.strip())
+        return {
+            "is_query_intent": bool(result.get("is_query_intent")),
+            "query": result.get("query"),
+        }
+    except Exception:
+        return {"is_query_intent": False, "query": None}
+
+
+>>>>>>> b3ecb39 (fix: add logging for file read errors and increase max tokens)
 def _format_task_due_date(value: Optional[str]) -> Optional[str]:
     if not value:
         return None
