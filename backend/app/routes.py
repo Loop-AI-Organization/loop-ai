@@ -271,6 +271,85 @@ async def append_to_file(
     return {"file": updated_file}
 
 
+@router.post("/api/files/query/stream")
+async def query_files_stream_endpoint(
+    body: FileQueryRequest,
+    user: Annotated[dict, Depends(get_current_user)],
+):
+    """
+    Stream an answer to a natural language question about selected files.
+    Reads file contents from storage and uses LLM to answer (streaming).
+    """
+    uid = user.get("sub")
+    if not uid:
+        raise HTTPException(status_code=401, detail="Invalid user")
+
+    if not body.file_ids:
+        raise HTTPException(status_code=400, detail="At least one file_id is required")
+
+    workspace_id: Optional[str] = None
+    for fid in body.file_ids:
+        file_res = (
+            supabase.table("files")
+            .select("id, workspace_id")
+            .eq("id", fid)
+            .limit(1)
+            .execute()
+        )
+        if file_res.data:
+            workspace_id = file_res.data[0].get("workspace_id")
+            break
+
+    if not workspace_id:
+        raise HTTPException(status_code=404, detail="Files not found")
+
+    ws = supabase.table("workspaces").select("id, user_id").eq("id", workspace_id).execute()
+    if not ws.data:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+    if ws.data[0]["user_id"] != uid:
+        members = (
+            supabase.table("workspace_members")
+            .select("user_id")
+            .eq("workspace_id", workspace_id)
+            .eq("user_id", uid)
+            .limit(1)
+            .execute()
+        )
+        if not members.data:
+            raise HTTPException(status_code=403, detail="Not a member of this workspace")
+
+    async def event_stream():
+        loop = asyncio.get_running_loop()
+        q = asyncio.Queue()
+
+        def run_gen():
+            try:
+                for delta in query_files_stream(file_ids=body.file_ids, question=body.question):
+                    asyncio.run_coroutine_threadsafe(q.put(delta.content), loop)
+            except Exception as exc:
+                asyncio.run_coroutine_threadsafe(q.put(f"[error: {exc}]"), loop)
+            finally:
+                asyncio.run_coroutine_threadsafe(q.put(None), loop)
+
+        loop.run_in_executor(None, run_gen)
+
+        while True:
+            content = await q.get()
+            if content is None:
+                break
+            if content.startswith("[error:"):
+                yield f"data: {json.dumps({'error': content})}\n\n"
+            else:
+                yield f"data: {json.dumps({'token': content})}\n\n"
+
+    from fastapi.responses import StreamingResponse
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
 class LogEventRequest(BaseModel):
     event_type: str = "sign_in"
 
