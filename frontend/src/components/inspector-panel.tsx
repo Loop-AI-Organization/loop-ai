@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
-import { X, Clock, Brain, File, ListChecks, FileText, Bookmark, BotOff, Download, Loader2 } from 'lucide-react';
+import { X, Clock, Brain, File, ListChecks, FileText, Bookmark, BotOff, Download, Loader2, Search } from 'lucide-react';
 import { useAppStore } from '@/store/app-store';
-import { fetchWorkspaceFiles, fetchChannelTasks, updateChannelSettings, exportChannelTasks } from '@/lib/supabase-data';
+import { fetchWorkspaceFiles, fetchChannelTasks, updateChannelSettings, exportChannelTasks, updateTaskViaApi, searchFiles, searchFilesAi } from '@/lib/supabase-data';
 import { getSupabase } from '@/lib/supabase';
-import type { Action, FileRecord, Task } from '@/types';
+import type { Action, FileRecord, Task, TaskStatus } from '@/types';
 import { FileCard } from '@/components/file-card';
 import { TaskCard } from '@/components/task-card';
 import { Button } from '@/components/ui/button';
@@ -11,6 +11,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
+import { Input } from '@/components/ui/input';
 import { ActionChip } from './action-chip';
 import { cn } from '@/lib/utils';
 
@@ -30,12 +31,18 @@ export function InspectorPanel() {
     removeTask,
   } = useAppStore();
   const [workspaceFiles, setWorkspaceFiles] = useState<FileRecord[]>([]);
+  const [fileSearchQuery, setFileSearchQuery] = useState('');
+  const [fileSearchResults, setFileSearchResults] = useState<FileRecord[] | null>(null);
+  const [fileSearchLoading, setFileSearchLoading] = useState(false);
+  const [fileSearchAiMode, setFileSearchAiMode] = useState(false);
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [settingsError, setSettingsError] = useState<string | null>(null);
   const [exportingTasks, setExportingTasks] = useState(false);
   const [taskExportMessage, setTaskExportMessage] = useState<string | null>(null);
   const [taskExportError, setTaskExportError] = useState<string | null>(null);
   const taskExportRequestIdRef = useRef(0);
+  const tabScrollViewportRef = useRef<HTMLDivElement | null>(null);
+  const [dragOverStatus, setDragOverStatus] = useState<TaskStatus | null>(null);
 
   const threadActions = currentChannelId ? actions : [];
   const currentChannel = channels.find((channel) => channel.id === currentChannelId) ?? null;
@@ -83,6 +90,19 @@ export function InspectorPanel() {
     }
   }
 
+  function handleTabStripWheel(event: React.WheelEvent<HTMLDivElement>) {
+    const viewport = tabScrollViewportRef.current;
+    if (!viewport) return;
+
+    const maxScroll = viewport.scrollWidth - viewport.clientWidth;
+    if (maxScroll <= 0) return;
+
+    event.preventDefault();
+    viewport.scrollLeft += Math.abs(event.deltaX) > Math.abs(event.deltaY)
+      ? event.deltaX
+      : event.deltaY;
+  }
+
   useEffect(() => {
     taskExportRequestIdRef.current += 1;
     setExportingTasks(false);
@@ -101,6 +121,32 @@ export function InspectorPanel() {
     }).catch(() => {});
     return () => { cancelled = true; };
   }, [currentWorkspaceId]);
+
+  const handleFileSearch = async () => {
+    if (!currentWorkspaceId || !fileSearchQuery.trim()) {
+      setFileSearchResults(null);
+      return;
+    }
+    setFileSearchLoading(true);
+    try {
+      if (fileSearchAiMode) {
+        const response = await searchFilesAi(currentWorkspaceId, fileSearchQuery.trim());
+        setFileSearchResults(response.files);
+      } else {
+        const results = await searchFiles(currentWorkspaceId, fileSearchQuery.trim());
+        setFileSearchResults(results);
+      }
+    } catch {
+      setFileSearchResults([]);
+    } finally {
+      setFileSearchLoading(false);
+    }
+  };
+
+  const handleFileSearchClear = () => {
+    setFileSearchQuery('');
+    setFileSearchResults(null);
+  };
 
   // Load tasks for current channel + realtime subscription
   useEffect(() => {
@@ -170,6 +216,43 @@ export function InspectorPanel() {
   const activeTasks = channelTasks.filter((t) => t.status !== 'proposed');
   const canExportTasks = activeTasks.length > 0;
 
+  const BOARD_COLUMNS: { status: TaskStatus; label: string; colorClass: string; headerClass: string }[] = [
+    { status: 'open', label: 'Open', colorClass: 'border-blue-500/30', headerClass: 'bg-blue-500/10 text-blue-600 dark:text-blue-400' },
+    { status: 'in_progress', label: 'In Progress', colorClass: 'border-amber-500/30', headerClass: 'bg-amber-500/10 text-amber-600 dark:text-amber-400' },
+    { status: 'blocked', label: 'Blocked', colorClass: 'border-red-500/30', headerClass: 'bg-red-500/10 text-red-600 dark:text-red-400' },
+    { status: 'done', label: 'Done', colorClass: 'border-green-500/30', headerClass: 'bg-green-500/10 text-green-600 dark:text-green-400' },
+  ];
+
+  function handleDragStart(e: React.DragEvent<HTMLDivElement>, taskId: string) {
+    e.dataTransfer.setData('taskId', taskId);
+    e.dataTransfer.effectAllowed = 'move';
+  }
+
+  function handleDragOver(e: React.DragEvent<HTMLDivElement>, status: TaskStatus) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    setDragOverStatus(status);
+  }
+
+  function handleDragLeave() {
+    setDragOverStatus(null);
+  }
+
+  async function handleDrop(e: React.DragEvent<HTMLDivElement>, targetStatus: TaskStatus) {
+    e.preventDefault();
+    setDragOverStatus(null);
+    const taskId = e.dataTransfer.getData('taskId');
+    if (!taskId) return;
+    const task = tasks.find((t) => t.id === taskId);
+    if (!task || task.status === targetStatus) return;
+    try {
+      const updated = await updateTaskViaApi(taskId, { status: targetStatus });
+      upsertTask(updated);
+    } catch (err) {
+      console.error('Failed to move task:', err);
+    }
+  }
+
   if (!isInspectorOpen) return null;
 
   return (
@@ -197,27 +280,36 @@ export function InspectorPanel() {
         {/* Tabs */}
         <Tabs defaultValue="context" className="flex-1 flex flex-col overflow-hidden">
           <TabsList className="w-full justify-start rounded-none border-b border-border bg-transparent h-10 px-2">
-            <TabsTrigger value="context" className="text-xs data-[state=active]:bg-muted">
-              <Brain className="w-3.5 h-3.5 mr-1.5" />
-              Context
-            </TabsTrigger>
-            <TabsTrigger value="actions" className="text-xs data-[state=active]:bg-muted">
-              <Clock className="w-3.5 h-3.5 mr-1.5" />
-              Actions
-            </TabsTrigger>
-            <TabsTrigger value="tasks" className="text-xs data-[state=active]:bg-muted">
-              <ListChecks className="w-3.5 h-3.5 mr-1.5" />
-              Tasks
-              {proposedTasks.length > 0 && (
-                <span className="ml-1 bg-primary text-primary-foreground text-2xs rounded-full px-1 min-w-[1rem] text-center leading-4">
-                  {proposedTasks.length}
-                </span>
-              )}
-            </TabsTrigger>
-            <TabsTrigger value="files" className="text-xs data-[state=active]:bg-muted">
-              <File className="w-3.5 h-3.5 mr-1.5" />
-              Files
-            </TabsTrigger>
+            <div
+              ref={tabScrollViewportRef}
+              className="relative -mx-2 flex-1 overflow-x-auto overflow-y-hidden overscroll-x-contain px-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+              onWheel={handleTabStripWheel}
+              aria-label="Inspector tabs"
+            >
+              <div className="flex w-max items-center gap-1 pr-2">
+                <TabsTrigger value="context" className="text-xs data-[state=active]:bg-muted">
+                  <Brain className="w-3.5 h-3.5 mr-1.5" />
+                  Context
+                </TabsTrigger>
+                <TabsTrigger value="actions" className="text-xs data-[state=active]:bg-muted">
+                  <Clock className="w-3.5 h-3.5 mr-1.5" />
+                  Actions
+                </TabsTrigger>
+                <TabsTrigger value="tasks" className="text-xs data-[state=active]:bg-muted">
+                  <ListChecks className="w-3.5 h-3.5 mr-1.5" />
+                  Tasks
+                  {proposedTasks.length > 0 && (
+                    <span className="ml-1 bg-primary text-primary-foreground text-2xs rounded-full px-1 min-w-[1rem] text-center leading-4">
+                      {proposedTasks.length}
+                    </span>
+                  )}
+                </TabsTrigger>
+                <TabsTrigger value="files" className="text-xs data-[state=active]:bg-muted">
+                  <File className="w-3.5 h-3.5 mr-1.5" />
+                  Files
+                </TabsTrigger>
+              </div>
+            </div>
           </TabsList>
 
           {/* Always-visible AI controls */}
@@ -337,15 +429,49 @@ export function InspectorPanel() {
                       </div>
                     )}
                     {activeTasks.length > 0 && (
-                      <div className="space-y-1.5">
+                      <div className="space-y-2">
                         {proposedTasks.length > 0 && (
                           <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
                             Board
                           </p>
                         )}
-                        {activeTasks.map((task) => (
-                          <TaskCard key={task.id} task={task} compact />
-                        ))}
+                        {BOARD_COLUMNS.map(({ status, label, colorClass, headerClass }) => {
+                          const columnTasks = activeTasks.filter((t) => t.status === status);
+                          const isOver = dragOverStatus === status;
+                          return (
+                            <div
+                              key={status}
+                              onDragOver={(e) => handleDragOver(e, status)}
+                              onDragLeave={handleDragLeave}
+                              onDrop={(e) => handleDrop(e, status)}
+                              className={cn(
+                                'rounded-lg border transition-colors',
+                                colorClass,
+                                isOver && 'ring-2 ring-primary/40 bg-primary/5'
+                              )}
+                            >
+                              <div className={cn('flex items-center justify-between px-2.5 py-1.5 rounded-t-lg', headerClass)}>
+                                <span className="text-xs font-semibold uppercase tracking-wide">{label}</span>
+                                <span className="text-xs opacity-70">{columnTasks.length}</span>
+                              </div>
+                              <div className="px-1.5 pb-1.5 min-h-[2rem]">
+                                {columnTasks.length === 0 ? (
+                                  <p className="text-center text-2xs text-muted-foreground py-2">Drop tasks here</p>
+                                ) : (
+                                  columnTasks.map((task) => (
+                                    <TaskCard
+                                      key={task.id}
+                                      task={task}
+                                      compact
+                                      draggable
+                                      onDragStart={handleDragStart}
+                                    />
+                                  ))
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
                     )}
                   </>
@@ -358,10 +484,59 @@ export function InspectorPanel() {
           <TabsContent value="files" className="flex-1 m-0 overflow-hidden">
             <ScrollArea className="h-full">
               <div className="p-4 space-y-3">
-                <p className="text-xs text-muted-foreground">
-                  Files in this workspace.
-                </p>
-                {workspaceFiles.length === 0 ? (
+                {/* Search bar */}
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+                    <Input
+                      placeholder={fileSearchAiMode ? "Ask about files naturally..." : "Search files..."}
+                      value={fileSearchQuery}
+                      onChange={(e) => setFileSearchQuery(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && handleFileSearch()}
+                      className="pl-8 h-8 text-xs"
+                    />
+                  </div>
+                  <Button size="sm" variant="secondary" onClick={handleFileSearch} disabled={fileSearchLoading}>
+                    Search
+                  </Button>
+                  {fileSearchResults !== null && (
+                    <Button size="sm" variant="ghost" onClick={handleFileSearchClear}>
+                      Clear
+                    </Button>
+                  )}
+                  <Button
+                    size="sm"
+                    variant={fileSearchAiMode ? "default" : "outline"}
+                    onClick={() => setFileSearchAiMode(!fileSearchAiMode)}
+                    title={fileSearchAiMode ? "AI search enabled - click to disable" : "Enable AI-powered natural language search"}
+                  >
+                    AI
+                  </Button>
+                </div>
+
+                {/* Results info */}
+                {fileSearchResults !== null && (
+                  <p className="text-xs text-muted-foreground">
+                    {fileSearchResults.length > 0
+                      ? `Found ${fileSearchResults.length} file(s) matching "${fileSearchQuery}"`
+                      : `No files found matching "${fileSearchQuery}"`}
+                  </p>
+                )}
+
+                {/* File list - search results or all files */}
+                {fileSearchResults !== null ? (
+                  fileSearchResults.length === 0 ? (
+                    <div className="text-center py-8 text-muted-foreground text-sm">
+                      No files found
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {fileSearchResults.map((file) => (
+                        <FileCard key={file.id} file={file} />
+                      ))}
+                    </div>
+                  )
+                ) : workspaceFiles.length === 0 ? (
                   <div className="text-center py-8 text-muted-foreground text-sm">
                     No files yet
                   </div>

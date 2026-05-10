@@ -792,6 +792,47 @@ export async function getFileDownloadUrl(fileId: string): Promise<string> {
   return body.url as string;
 }
 
+export async function searchFiles(
+  workspaceId: string,
+  query?: string,
+  contentTypeFilter?: string
+): Promise<FileRecord[]> {
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${API_URL}/api/files/search`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      workspace_id: workspaceId,
+      query: query ?? null,
+      content_type_filter: contentTypeFilter ?? null,
+    }),
+  });
+  if (!res.ok) throw new Error('Failed to search files');
+  const body = await res.json();
+  return (body.files as FileRow[]).map(toFileRecord);
+}
+
+export async function searchFilesAi(
+  workspaceId: string,
+  query: string
+): Promise<{ files: FileRecord[]; intent: { is_file_intent: boolean; intent_type: string; query: string | null } }> {
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${API_URL}/api/files/search/ai`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      workspace_id: workspaceId,
+      query,
+    }),
+  });
+  if (!res.ok) throw new Error('Failed to search files');
+  const body = await res.json();
+  return {
+    files: (body.files as FileRow[]).map(toFileRecord),
+    intent: body.intent,
+  };
+}
+
 export async function exportChannelTasks(channelId: string): Promise<FileRecord> {
   const headers = await getAuthHeaders();
   const res = await fetch(`${API_URL}/api/channels/${channelId}/tasks/export`, {

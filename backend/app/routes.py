@@ -29,6 +29,7 @@ from loop_ai.orchestrator.orchestrator import (
     export_tasks_as_document,
     append_to_document_file,
     detect_doc_or_task_ambiguity,
+    create_file_from_content,
 )
 from loop_ai.tasks.assignee_resolver import resolve_assignees
 
@@ -205,6 +206,232 @@ async def download_file(
         raise HTTPException(status_code=500, detail="Failed to create download URL")
 
     return {"url": url}
+
+
+class FileAppendRequest(BaseModel):
+    section_title: str
+    section_content: str
+    workspace_id: str
+
+
+@router.post("/api/files/{file_id}/append")
+async def append_to_file(
+    file_id: str,
+    body: FileAppendRequest,
+    user: Annotated[dict, Depends(get_current_user)],
+):
+    """Append a new section to an existing document file."""
+    uid = user.get("sub")
+    if not uid:
+        raise HTTPException(status_code=401, detail="Invalid user")
+
+    file_res = (
+        supabase.table("files")
+        .select("id, workspace_id, storage_path")
+        .eq("id", file_id)
+        .execute()
+    )
+    if not file_res.data:
+        raise HTTPException(status_code=404, detail="File not found")
+    file_row = file_res.data[0]
+
+    workspace_id = file_row["workspace_id"]
+    if workspace_id != body.workspace_id:
+        raise HTTPException(status_code=400, detail="File does not belong to the specified workspace")
+
+    ws = supabase.table("workspaces").select("id, user_id").eq("id", workspace_id).execute()
+    if not ws.data:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+    if ws.data[0]["user_id"] != uid:
+        members = (
+            supabase.table("workspace_members")
+            .select("user_id")
+            .eq("workspace_id", workspace_id)
+            .eq("user_id", uid)
+            .execute()
+        )
+        if not members.data:
+            raise HTTPException(status_code=403, detail="Not a member of this workspace")
+
+    import asyncio
+    loop = asyncio.get_running_loop()
+    updated_file = await loop.run_in_executor(
+        None,
+        lambda: append_to_document_file(
+            file_id=file_id,
+            workspace_id=workspace_id,
+            section_title=body.section_title,
+            section_content=body.section_content,
+        ),
+    )
+
+    if not updated_file:
+        raise HTTPException(status_code=500, detail="Failed to append to file")
+
+    return {"file": updated_file}
+
+
+class FileSearchRequest(BaseModel):
+    workspace_id: str
+    query: Optional[str] = None
+    content_type_filter: Optional[str] = None
+
+
+class FileSearchAiRequest(BaseModel):
+    workspace_id: str
+    query: str  # natural language query
+
+
+@router.post("/api/files/search")
+async def search_files_api(
+    body: FileSearchRequest,
+    user: Annotated[dict, Depends(get_current_user)],
+):
+    """Search files in a workspace using keyword matching."""
+    uid = user.get("sub")
+    if not uid:
+        raise HTTPException(status_code=401, detail="Invalid user")
+
+    # Verify workspace access
+    ws = (
+        supabase.table("workspaces")
+        .select("id, user_id")
+        .eq("id", body.workspace_id)
+        .execute()
+    )
+    if not ws.data:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+    owner_id = ws.data[0].get("user_id")
+    if owner_id != uid:
+        members = (
+            supabase.table("workspace_members")
+            .select("user_id")
+            .eq("workspace_id", body.workspace_id)
+            .eq("user_id", uid)
+            .execute()
+        )
+        if not members.data:
+            raise HTTPException(status_code=403, detail="Not a member of this workspace")
+
+    # Perform the search
+    q = supabase.table("files").select("*").eq("workspace_id", body.workspace_id)
+
+    if body.content_type_filter:
+        q = q.ilike("content_type", f"%{body.content_type_filter}%")
+
+    result = q.order("created_at", desc=True).limit(50).execute()
+    files = result.data or []
+
+    if not body.query:
+        return {"files": files[:10]}
+
+    query_lower = body.query.lower()
+    query_words = query_lower.split()
+
+    def score_file(f: dict) -> int:
+        s = 0
+        name = (f.get("file_name") or "").lower()
+        summary = (f.get("summary") or "").lower()
+        context = (f.get("project_context") or "").lower()
+        tags = [t.lower() for t in (f.get("tags") or [])]
+
+        for word in query_words:
+            if word in name:
+                s += 10
+            if any(word in tag for tag in tags):
+                s += 7
+            if word in summary:
+                s += 5
+            if word in context:
+                s += 3
+        return s
+
+    scored = [(score_file(f), f) for f in files]
+    scored = [(s, f) for s, f in scored if s > 0]
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return {"files": [f for _, f in scored[:10]]}
+
+
+<<<<<<< HEAD
+@router.post("/api/files/query/stream")
+async def query_files_stream_endpoint(
+    body: FileQueryRequest,
+    user: Annotated[dict, Depends(get_current_user)],
+):
+    """
+    Stream an answer to a natural language question about selected files.
+    Reads file contents from storage and uses LLM to answer (streaming).
+    """
+    uid = user.get("sub")
+    if not uid:
+        raise HTTPException(status_code=401, detail="Invalid user")
+=======
+@router.post("/api/files/search/ai")
+async def search_files_ai(
+    body: FileSearchAiRequest,
+    user: Annotated[dict, Depends(get_current_user)],
+):
+    """Search files using LLM-powered natural language understanding."""
+    uid = user.get("sub")
+    if not uid:
+        raise HTTPException(status_code=401, detail="Invalid user")
+
+    if not body.query or not body.query.strip():
+        raise HTTPException(status_code=400, detail="query is required")
+
+    # Verify workspace access
+    ws = (
+        supabase.table("workspaces")
+        .select("id, user_id")
+        .eq("id", body.workspace_id)
+        .execute()
+    )
+    if not ws.data:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+    owner_id = ws.data[0].get("user_id")
+    if owner_id != uid:
+        members = (
+            supabase.table("workspace_members")
+            .select("user_id")
+            .eq("workspace_id", body.workspace_id)
+            .eq("user_id", uid)
+            .execute()
+        )
+        if not members.data:
+            raise HTTPException(status_code=403, detail="Not a member of this workspace")
+
+    loop = asyncio.get_running_loop()
+
+    # Use detect_file_intent to interpret the natural language query
+    file_intent = await loop.run_in_executor(
+        None,
+        lambda: detect_file_intent(
+            messages=[{"role": "user", "content": body.query}]
+        ),
+    )
+
+    # Only handle find_file intent for search
+    if not file_intent.get("is_file_intent") or file_intent.get("intent_type") != "find_file":
+        # Not a file find intent - try simple keyword search as fallback
+        search_query = body.query
+    else:
+        # Use the interpreted query from LLM
+        search_query = file_intent.get("query") or body.query
+
+    # Perform the search using the orchestrator's search_files
+    found_files = await loop.run_in_executor(
+        None,
+        lambda: search_files(workspace_id=body.workspace_id, query=search_query),
+    )
+
+    return {
+        "files": found_files,
+        "intent": {
+            "is_file_intent": file_intent.get("is_file_intent"),
+            "intent_type": file_intent.get("intent_type"),
+            "query": file_intent.get("query"),
+        },
+    }
 
 
 class LogEventRequest(BaseModel):
@@ -1561,6 +1788,53 @@ async def respond_to_ai_mention(
                 }
             else:
                 content = "I couldn't generate the document — there may not be enough messages in the specified time range."
+                return {"should_respond": True, "content": content}
+
+    if file_intent.get("is_file_intent") and file_intent.get("intent_type") == "create_file":
+        ch_res = supabase.table("channels").select("workspace_id").eq("id", channel_id).execute()
+        workspace_id = ch_res.data[0]["workspace_id"] if ch_res.data else None
+        if workspace_id:
+            file_name = file_intent.get("file_name") or "untitled.txt"
+            file_content = file_intent.get("file_content") or ""
+            if not file_content:
+                content = "I couldn't create that file — no content was provided."
+                return {"should_respond": True, "content": content}
+
+            wid = workspace_id
+            fn = file_name
+            fc = file_content
+            cb = uid
+            cid = channel_id
+            generated = await loop.run_in_executor(
+                None,
+                lambda w=wid, f=fn, c=fc, u=cb, ch=cid: create_file_from_content(
+                    workspace_id=w,
+                    file_name=f,
+                    file_content=c,
+                    created_by=u,
+                    source_channel_id=ch,
+                ),
+            )
+            if generated:
+                file_marker = f':::file{{id="{generated["id"]}"}}'
+                content = f'I created "{file_name}":\n\n{file_marker}'
+                try:
+                    result = supabase.table("messages").insert({
+                        "thread_id": thread_id,
+                        "role": "assistant",
+                        "content": content,
+                    }).execute()
+                    saved = result.data[0] if result.data else None
+                except Exception:
+                    saved = None
+                return {
+                    "should_respond": True,
+                    "message_id": saved["id"] if saved else None,
+                    "content": content,
+                    "files": [generated],
+                }
+            else:
+                content = "I couldn't create that file. Please try again."
                 return {"should_respond": True, "content": content}
 
     if file_intent.get("is_file_intent") and file_intent.get("intent_type") == "export_tasks":

@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Dict, Iterator, List, Optional
 
 from loop_ai.config import load_settings
-from loop_ai.llm.openrouter_client import stream_chat_completions, chat_completion
+
+logger = logging.getLogger(__name__)
+from loop_ai.llm.openrouter_client import stream_chat_completions, chat_completion, OpenRouterDelta
 
 
 TRIAGE_SYSTEM_PROMPT = (
@@ -207,19 +210,21 @@ def generate_full_response(*, messages: List[Dict[str, str]]) -> str:
 
 
 _FILE_INTENT_DETECT_PROMPT = """\
-You are a file intent detector. Decide if the user wants to find files, create a document, export tasks, or append content to an existing document.
+You are a file intent detector. Decide if the user wants to find files, create a document, export tasks, append content to an existing document, or create a new file from scratch.
 
 IMPORTANT: Do NOT classify as a file intent if the user wants to extract action items or tasks as trackable to-do items (that is a task intent, not a file intent). Only classify as "create_document" when the user explicitly wants a written document, summary, or report — not when they want to track tasks.
 
 Reply ONLY with valid JSON:
 {
   "is_file_intent": true/false,
-  "intent_type": "find_file" | "create_document" | "export_tasks" | "append_to_document" | "none",
+  "intent_type": "find_file" | "create_document" | "export_tasks" | "append_to_document" | "create_file" | "none",
   "query": "<search query for find_file, or null>",
   "doc_title": "<new document title or appended section title, or null>",
   "time_range_days": <number or null>,
   "instructions": "<what to extract or summarize, or null>",
-  "target_file_query": "<name/description of the existing file to append to, or null>"
+  "target_file_query": "<name/description of the existing file to append to, or null>",
+  "file_content": "<actual file content to store (for create_file only), or null>",
+  "file_name": "<desired file name with extension (for create_file only), or null>"
 }
 
 Examples:
@@ -233,8 +238,11 @@ Examples:
 - "append a task summary to the sprint doc" -> append_to_document, target_file_query="sprint", doc_title="Task Summary"
 - "extract action items from last 2 days" -> NOT a file intent (is_file_intent=false) — this is a task intent
 - "pull out the tasks from this week" -> NOT a file intent (is_file_intent=false) — this is a task intent
+- "create a new file called test.py with def hello: pass" -> create_file, file_name="test.py", file_content="def hello:\\n    pass"
+- "create a file README.md with the text Hello World" -> create_file, file_name="README.md", file_content="Hello World"
+- "make a new file config.json" -> create_file, file_name="config.json"
 
-If not a file intent, return {"is_file_intent": false, "intent_type": "none", "query": null, "doc_title": null, "time_range_days": null, "instructions": null, "target_file_query": null}.\
+If not a file intent, return {"is_file_intent": false, "intent_type": "none", "query": null, "doc_title": null, "time_range_days": null, "instructions": null, "target_file_query": null, "file_content": null, "file_name": null}.\
 """
 
 
@@ -262,6 +270,8 @@ def detect_file_intent(*, messages: List[Dict[str, str]]) -> Dict:
             "time_range_days": result.get("time_range_days"),
             "instructions": result.get("instructions"),
             "target_file_query": result.get("target_file_query"),
+            "file_content": result.get("file_content"),
+            "file_name": result.get("file_name"),
         }
     except Exception:
         return {
@@ -272,6 +282,8 @@ def detect_file_intent(*, messages: List[Dict[str, str]]) -> Dict:
             "time_range_days": None,
             "instructions": None,
             "target_file_query": None,
+            "file_content": None,
+            "file_name": None,
         }
 
 
@@ -716,6 +728,204 @@ _TASK_EXPORT_STATUS_LABELS = {
 }
 
 
+def query_files(
+    *,
+    file_ids: List[str],
+    question: str,
+) -> Dict:
+    """
+    Answer a natural language question about selected files.
+    Downloads file content from Supabase storage and uses LLM to answer.
+
+    Returns {"answer": str, "files": [{"id": str, "name": str}], "error": str or None}.
+    """
+    from app.supabase_client import supabase
+
+    if not file_ids:
+        return {"answer": "", "files": [], "error": "No files selected"}
+
+    if not question.strip():
+        return {"answer": "", "files": [], "error": "No question provided"}
+
+    settings = load_settings()
+
+    # Fetch file records
+    file_res = supabase.table("files").select("id, file_name, storage_path, content_type").in_("id", file_ids).execute()
+    file_rows = file_res.data or []
+    if not file_rows:
+        return {"answer": "", "files": [], "error": "Files not found"}
+
+    bucket = "workspace-files"
+    file_contents: List[Dict] = []
+
+    for f in file_rows:
+        storage_path = f.get("storage_path")
+        if not storage_path:
+            continue
+        try:
+            bytes_data = supabase.storage.from_(bucket).download(storage_path)
+            text = bytes_data.decode("utf-8", errors="ignore")
+            # Truncate very long files to avoid token limits
+            max_chars = 50000
+            if len(text) > max_chars:
+                text = text[:max_chars] + f"\n\n[... File truncated at {max_chars} characters ...]"
+            file_contents.append({
+                "id": f["id"],
+                "name": f.get("file_name", "unknown"),
+                "content": text,
+            })
+        except Exception as exc:
+            logger.warning("query_files: failed to read file id=%s path=%s error=%s", f["id"], storage_path, exc)
+            # If we can't read a file, skip it but continue
+            file_contents.append({
+                "id": f["id"],
+                "name": f.get("file_name", "unknown"),
+                "content": "",
+            })
+
+    if not file_contents or not any(f["content"] for f in file_contents):
+        return {"answer": "", "files": [{"id": f["id"], "name": f.get("file_name", "unknown")} for f in file_rows], "error": "Could not read any file contents"}
+
+    # Build context from file contents
+    context_parts = []
+    for f in file_contents:
+        context_parts.append(f"--- File: {f['name']} ---\n{f['content']}")
+    context = "\n\n".join(context_parts)
+
+    prompt = (
+        "You are a helpful assistant answering questions about provided documents.\n\n"
+        "Answer the user's question based ONLY on the document content provided below.\n"
+        "If the answer is not in the documents, say so clearly.\n"
+        "Be specific and cite which file(s) contain the relevant information.\n\n"
+        f"Question: {question}\n\n"
+        f"Document(s):\n{context}\n\n"
+        "Answer:"
+    )
+
+    answer = chat_completion(
+        settings=settings,
+        messages=[{"role": "user", "content": prompt}],
+        model=settings.openrouter_response_model,
+        max_tokens=2048,
+        temperature=0.3,
+        timeout=120.0,
+    ).strip()
+
+    files_summary = [{"id": f["id"], "name": f.get("file_name", "unknown")} for f in file_rows]
+
+    return {"answer": answer, "files": files_summary, "error": None}
+
+
+def query_files_stream(
+    *,
+    file_ids: List[str],
+    question: str,
+) -> Iterator[OpenRouterDelta]:
+    """
+    Streaming version of query_files. Yields content deltas.
+    """
+    from app.supabase_client import supabase
+
+    if not file_ids or not question.strip():
+        return
+
+    settings = load_settings()
+
+    file_res = supabase.table("files").select("id, file_name, storage_path").in_("id", file_ids).execute()
+    file_rows = file_res.data or []
+    if not file_rows:
+        return
+
+    bucket = "workspace-files"
+    file_contents: List[Dict] = []
+
+    for f in file_rows:
+        storage_path = f.get("storage_path")
+        if not storage_path:
+            continue
+        try:
+            bytes_data = supabase.storage.from_(bucket).download(storage_path)
+            text = bytes_data.decode("utf-8", errors="ignore")
+            max_chars = 50000
+            if len(text) > max_chars:
+                text = text[:max_chars] + f"\n\n[... File truncated at {max_chars} characters ...]"
+            file_contents.append({"id": f["id"], "name": f.get("file_name", "unknown"), "content": text})
+        except Exception as exc:
+            logger.warning("query_files_stream: failed to read file id=%s path=%s error=%s", f["id"], storage_path, exc)
+            file_contents.append({"id": f["id"], "name": f.get("file_name", "unknown"), "content": ""})
+
+    if not file_contents or not any(f["content"] for f in file_contents):
+        return
+
+    context_parts = []
+    for f in file_contents:
+        context_parts.append(f"--- File: {f['name']} ---\n{f['content']}")
+    context = "\n\n".join(context_parts)
+
+    prompt = (
+        "You are a helpful assistant answering questions about provided documents.\n\n"
+        "Answer the user's question based ONLY on the document content provided below.\n"
+        "If the answer is not in the documents, say so clearly.\n"
+        "Be specific and cite which file(s) contain the relevant information.\n\n"
+        f"Question: {question}\n\n"
+        f"Document(s):\n{context}\n\n"
+        "Answer:"
+    )
+
+    for delta in stream_chat_completions(
+        settings=settings,
+        messages=[{"role": "user", "content": prompt}],
+        max_tokens=2048,
+    ):
+        yield delta
+
+
+_FILE_QUERY_PROMPT = """\
+You are a file query intent detector. Decide if the user is asking a question ABOUT files they have selected.
+
+Reply ONLY with valid JSON:
+{{"is_query_intent": true/false, "query": "<the actual question they are asking, or null>"}}
+
+Examples:
+- "what's in this file?" -> is_query_intent=true, query="what's in this file?"
+- "summarize these docs" -> is_query_intent=true, query="summarize these docs"
+- "find the design doc" -> is_query_intent=false (that's a find intent, not a query)
+- "create a summary doc" -> is_query_intent=false (that's a create intent)
+- "tell me about the budget numbers" -> is_query_intent=true, query="tell me about the budget numbers"
+- "what does the API spec say about auth?" -> is_query_intent=true, query="what does the API spec say about auth?"
+
+If not asking about the content of selected files, return {{"is_query_intent": false, "query": null}}.\
+"""
+
+
+def detect_file_query_intent(*, messages: List[Dict[str, str]]) -> Dict:
+    """
+    Detect if the user is asking a question about selected files.
+    Returns {"is_query_intent": bool, "query": str | None}.
+    """
+    settings = load_settings()
+    msgs = [
+        {"role": "system", "content": _FILE_QUERY_PROMPT},
+        *messages[-3:],
+    ]
+    raw = chat_completion(
+        settings=settings,
+        messages=msgs,
+        model=settings.openrouter_triage_model,
+        max_tokens=80,
+        temperature=0.0,
+    )
+    try:
+        result = json.loads(raw.strip())
+        return {
+            "is_query_intent": bool(result.get("is_query_intent")),
+            "query": result.get("query"),
+        }
+    except Exception:
+        return {"is_query_intent": False, "query": None}
+
+
+>>>>>>> b3ecb39 (fix: add logging for file read errors and increase max tokens)
 def _format_task_due_date(value: Optional[str]) -> Optional[str]:
     if not value:
         return None
@@ -879,6 +1089,90 @@ def append_to_document_file(
     }).eq("id", file_id).execute()
 
     return updated_row.data[0] if updated_row.data else file_row
+
+
+def _guess_content_type(file_name: str) -> str:
+    """Guess content type from file extension."""
+    ext = file_name.lower().rsplit(".", 1)[-1] if "." in file_name else ""
+    mapping = {
+        "md": "text/markdown",
+        "markdown": "text/markdown",
+        "json": "application/json",
+        "xml": "application/xml",
+        "csv": "text/csv",
+        "ts": "application/typescript",
+        "js": "application/javascript",
+        "jsx": "application/javascript",
+        "tsx": "application/typescript",
+        "py": "text/x-python",
+        "css": "text/css",
+        "html": "text/html",
+        "yaml": "text/yaml",
+        "yml": "text/yaml",
+        "toml": "application/toml",
+        "ini": "text/ini",
+        "sh": "application/x-sh",
+        "bash": "application/x-sh",
+        "sql": "text/sql",
+        "svg": "image/svg+xml",
+        "png": "image/png",
+        "jpg": "image/jpeg",
+        "jpeg": "image/jpeg",
+        "gif": "image/gif",
+        "pdf": "application/pdf",
+        "zip": "application/zip",
+        "tar": "application/x-tar",
+        "gz": "application/gzip",
+        "txt": "text/plain",
+    }
+    return mapping.get(ext, "text/plain")
+
+
+def create_file_from_content(
+    *,
+    workspace_id: str,
+    file_name: str,
+    file_content: str,
+    created_by: str,
+    source_channel_id: Optional[str] = None,
+) -> Optional[Dict]:
+    """
+    Store a raw file (text or code) directly in Supabase storage and create a files row.
+    Returns the file record dict or None on failure.
+    """
+    from app.supabase_client import supabase
+    import uuid as _uuid
+
+    bucket = "workspace-files"
+    safe_name = "".join(c if c.isalnum() or c in "._-" else "_" for c in file_name).strip()
+    storage_path = f"{workspace_id}/files/{_uuid.uuid4()}-{safe_name}"
+    content_type = _guess_content_type(safe_name)
+
+    try:
+        supabase.storage.from_(bucket).upload(
+            storage_path,
+            file_content.encode("utf-8"),
+            {"content-type": content_type},
+        )
+    except Exception:
+        return None
+
+    row = {
+        "workspace_id": workspace_id,
+        "source": "generated",
+        "storage_path": storage_path,
+        "file_name": safe_name,
+        "file_size": len(file_content.encode("utf-8")),
+        "content_type": content_type,
+        "created_by": created_by,
+        "metadata_status": "ready",
+        "summary": f"Created file: {safe_name}",
+        "tags": ["created"],
+        "project_context": "Created via prompt",
+        "source_channel_id": source_channel_id,
+    }
+    result = supabase.table("files").insert(row).execute()
+    return result.data[0] if result.data else None
 
 
 _DOCUMENT_GEN_PROMPT = """\

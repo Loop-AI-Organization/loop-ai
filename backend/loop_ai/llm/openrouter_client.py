@@ -59,6 +59,7 @@ def stream_chat_completions(
     settings: Settings,
     messages: List[Dict[str, str]],
     model: Optional[str] = None,
+    max_tokens: Optional[int] = None,
 ) -> Iterator[OpenRouterDelta]:
     """
     Streams OpenRouter chat completion deltas.
@@ -79,7 +80,7 @@ def stream_chat_completions(
     payload: Dict[str, Any] = {
         "model": model or settings.openrouter_model,
         "stream": True,
-        "max_tokens": settings.openrouter_max_tokens,
+        "max_tokens": max_tokens if max_tokens is not None else settings.openrouter_max_tokens,
         "temperature": settings.openrouter_temperature,
         "messages": messages,
     }
