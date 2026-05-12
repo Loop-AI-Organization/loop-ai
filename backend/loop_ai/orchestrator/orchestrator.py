@@ -728,6 +728,25 @@ _TASK_EXPORT_STATUS_LABELS = {
 }
 
 
+def _extract_file_text(bytes_data: bytes, *, content_type: Optional[str], file_name: str) -> str:
+    """Extract text from supported file bytes; PDF uses pypdf when installed."""
+    is_pdf = (content_type or "").lower() == "application/pdf" or file_name.lower().endswith(".pdf")
+    fallback = bytes_data.decode("utf-8", errors="ignore")
+    if not is_pdf:
+        return fallback
+
+    try:
+        from io import BytesIO
+        from pypdf import PdfReader  # type: ignore
+
+        reader = PdfReader(BytesIO(bytes_data))
+        pages = [page.extract_text() or "" for page in reader.pages]
+        extracted = "\n\n".join(page for page in pages if page.strip()).strip()
+        return extracted or fallback
+    except Exception:
+        return fallback
+
+
 def query_files(
     *,
     file_ids: List[str],
@@ -764,7 +783,11 @@ def query_files(
             continue
         try:
             bytes_data = supabase.storage.from_(bucket).download(storage_path)
-            text = bytes_data.decode("utf-8", errors="ignore")
+            text = _extract_file_text(
+                bytes_data,
+                content_type=f.get("content_type"),
+                file_name=f.get("file_name", "unknown"),
+            )
             # Truncate very long files to avoid token limits
             max_chars = 50000
             if len(text) > max_chars:
@@ -845,7 +868,11 @@ def query_files_stream(
             continue
         try:
             bytes_data = supabase.storage.from_(bucket).download(storage_path)
-            text = bytes_data.decode("utf-8", errors="ignore")
+            text = _extract_file_text(
+                bytes_data,
+                content_type=f.get("content_type"),
+                file_name=f.get("file_name", "unknown"),
+            )
             max_chars = 50000
             if len(text) > max_chars:
                 text = text[:max_chars] + f"\n\n[... File truncated at {max_chars} characters ...]"

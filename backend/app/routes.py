@@ -30,6 +30,7 @@ from loop_ai.orchestrator.orchestrator import (
     append_to_document_file,
     detect_doc_or_task_ambiguity,
     create_file_from_content,
+    query_files,
 )
 from loop_ai.tasks.assignee_resolver import resolve_assignees
 
@@ -84,6 +85,12 @@ class CreateChannelRequest(BaseModel):
     type: str = "project"
 
 
+class FileQueryRequest(BaseModel):
+    workspace_id: str
+    file_ids: List[str]
+    question: str
+
+
 @router.get("/health")
 async def health():
     return {"ok": True}
@@ -120,6 +127,12 @@ async def upload_file(
         )
         if not members.data:
             raise HTTPException(status_code=403, detail="Not a member of this workspace")
+    if body.channel_id:
+        channel = _select_channel_by_id(body.channel_id)
+        if not channel or channel.get("workspace_id") != body.workspace_id:
+            raise HTTPException(status_code=404, detail="Channel not found")
+        if not _user_can_access_channel(channel, uid):
+            raise HTTPException(status_code=403, detail="Not a member of this channel")
 
     safe_name = "".join(c if c.isalnum() or c in "._-" else "_" for c in body.file_name)
     storage_path = f"{body.workspace_id}/uploads/{_uuid.uuid4()}-{safe_name}"
@@ -420,6 +433,48 @@ async def search_files_ai(
     }
 
 
+@router.post("/api/files/query")
+async def query_files_api(
+    body: FileQueryRequest,
+    user: Annotated[dict, Depends(get_current_user)],
+):
+    """Answer a question using only explicitly selected, accessible files."""
+    uid = user.get("sub")
+    if not uid:
+        raise HTTPException(status_code=401, detail="Invalid user")
+
+    file_ids = [file_id.strip() for file_id in body.file_ids if file_id and file_id.strip()]
+    if not file_ids:
+        raise HTTPException(status_code=400, detail="Select at least one file")
+    if not body.question.strip():
+        raise HTTPException(status_code=400, detail="Question is required")
+    if not _user_can_access_workspace(body.workspace_id, uid):
+        raise HTTPException(status_code=403, detail="Not a member of this workspace")
+
+    file_res = (
+        supabase.table("files")
+        .select("id, workspace_id")
+        .in_("id", file_ids)
+        .execute()
+    )
+    rows = file_res.data or []
+    found_ids = {row["id"] for row in rows}
+    missing_ids = [file_id for file_id in file_ids if file_id not in found_ids]
+    if missing_ids:
+        raise HTTPException(status_code=404, detail="One or more selected files were not found")
+    if any(row.get("workspace_id") != body.workspace_id for row in rows):
+        raise HTTPException(status_code=403, detail="One or more selected files are not accessible")
+
+    loop = asyncio.get_running_loop()
+    result = await loop.run_in_executor(
+        None,
+        lambda: query_files(file_ids=file_ids, question=body.question),
+    )
+    if result.get("error"):
+        raise HTTPException(status_code=422, detail=result["error"])
+    return result
+
+
 class LogEventRequest(BaseModel):
     event_type: str = "sign_in"
 
@@ -463,6 +518,20 @@ def _user_can_access_workspace(workspace_id: str, user_id: str) -> bool:
     return bool(member.data)
 
 
+def _user_is_workspace_owner(workspace_id: str, user_id: str) -> bool:
+    ws = (
+        supabase.table("workspaces")
+        .select("id, user_id, owner_id")
+        .eq("id", workspace_id)
+        .limit(1)
+        .execute()
+    )
+    if not ws.data:
+        return False
+    row = ws.data[0]
+    return row.get("user_id") == user_id or row.get("owner_id") == user_id
+
+
 def _dm_pair_key(user_a: str, user_b: str) -> str:
     return ":".join(sorted([user_a, user_b]))
 
@@ -493,6 +562,32 @@ def _user_can_access_channel(channel: dict, user_id: str) -> bool:
         .execute()
     )
     return bool(member.data)
+
+
+def _require_channel_access(channel_id: str, user_id: str) -> dict:
+    channel = _select_channel_by_id(channel_id)
+    if not channel:
+        raise HTTPException(status_code=404, detail="Channel not found")
+    if not _user_can_access_workspace(channel["workspace_id"], user_id):
+        raise HTTPException(status_code=403, detail="Not a member of this workspace")
+    if not _user_can_access_channel(channel, user_id):
+        raise HTTPException(status_code=403, detail="Not a member of this channel")
+    return channel
+
+
+def _require_task_access(task_id: str, user_id: str) -> dict:
+    task_res = (
+        supabase.table("tasks")
+        .select("id, workspace_id, channel_id, status")
+        .eq("id", task_id)
+        .limit(1)
+        .execute()
+    )
+    if not task_res.data:
+        raise HTTPException(status_code=404, detail="Task not found")
+    task = task_res.data[0]
+    _require_channel_access(task["channel_id"], user_id)
+    return task
 
 
 def _partition_resolved_assignees(
@@ -1068,6 +1163,7 @@ async def list_channel_tasks(
     uid = user.get("sub")
     if not uid:
         raise HTTPException(status_code=401, detail="Invalid user")
+    _require_channel_access(channel_id, uid)
     res = (
         supabase.table("tasks")
         .select("*, task_assignees(display_name, user_id)")
@@ -1126,6 +1222,7 @@ async def confirm_task(
     uid = user.get("sub")
     if not uid:
         raise HTTPException(status_code=401, detail="Invalid user")
+    _require_task_access(task_id, uid)
     res = supabase.table("tasks").update({"status": "open"}).eq("id", task_id).eq("status", "proposed").execute()
     if not res.data:
         raise HTTPException(status_code=404, detail="Task not found or not in proposed state")
@@ -1146,9 +1243,10 @@ async def delete_task(
     uid = user.get("sub")
     if not uid:
         raise HTTPException(status_code=401, detail="Invalid user")
-    task_res = supabase.table("tasks").select("id, status").eq("id", task_id).execute()
+    task_res = supabase.table("tasks").select("id, status, channel_id").eq("id", task_id).execute()
     if not task_res.data:
         return {"ok": True}
+    _require_channel_access(task_res.data[0]["channel_id"], uid)
     was_proposed = task_res.data[0].get("status") == "proposed"
     if was_proposed:
         supabase.table("task_events").insert({
@@ -1170,6 +1268,7 @@ async def update_task(
     uid = user.get("sub")
     if not uid:
         raise HTTPException(status_code=401, detail="Invalid user")
+    _require_task_access(task_id, uid)
 
     valid_statuses = {"proposed", "open", "in_progress", "done", "blocked"}
     updates: dict = {}
@@ -1398,6 +1497,17 @@ def _get_user_channels(uid: str) -> list[dict]:
     )
     result = []
     for ch in (channels_res.data or []):
+        if ch.get("type") == "dm":
+            member = (
+                supabase.table("channel_members")
+                .select("user_id")
+                .eq("channel_id", ch["id"])
+                .eq("user_id", uid)
+                .limit(1)
+                .execute()
+            )
+            if not member.data:
+                continue
         ws = workspace_map.get(ch["workspace_id"], {})
         result.append({
             "id": ch["id"],
@@ -1481,9 +1591,13 @@ async def update_channel_settings(
         raise HTTPException(status_code=404, detail="Channel not found")
     if not _user_can_access_workspace(channel["workspace_id"], uid):
         raise HTTPException(status_code=403, detail="Not a member of this workspace")
+    if not _user_can_access_channel(channel, uid):
+        raise HTTPException(status_code=403, detail="Not a member of this channel")
 
     updates: dict[str, bool] = {}
     if body.is_llm_restricted is not None:
+        if not _user_is_workspace_owner(channel["workspace_id"], uid):
+            raise HTTPException(status_code=403, detail="Only workspace owners can change restricted-LLM mode")
         updates["is_llm_restricted"] = body.is_llm_restricted
     if body.llm_participation_enabled is not None:
         updates["llm_participation_enabled"] = body.llm_participation_enabled
@@ -1516,6 +1630,8 @@ async def enqueue_channel_summary_refresh(
         raise HTTPException(status_code=404, detail="Channel not found")
     if not _user_can_access_workspace(channel["workspace_id"], uid):
         raise HTTPException(status_code=403, detail="Not a member of this workspace")
+    if not _user_can_access_channel(channel, uid):
+        raise HTTPException(status_code=403, detail="Not a member of this channel")
 
     try:
         enqueue_action(channel_id, "generate_summary", action_id=None)
@@ -1554,6 +1670,10 @@ async def respond_to_ai_mention(
     channel = _select_channel_by_id(channel_id)
     if not channel:
         return {"should_respond": False, "reason": "channel settings unavailable"}
+    if not _user_can_access_workspace(channel["workspace_id"], uid):
+        raise HTTPException(status_code=403, detail="Not a member of this workspace")
+    if not _user_can_access_channel(channel, uid):
+        raise HTTPException(status_code=403, detail="Not a member of this channel")
     if channel.get("is_llm_restricted") is True:
         return {"should_respond": False, "reason": "channel is restricted-llm"}
     if channel.get("llm_participation_enabled") is False:
@@ -1600,7 +1720,7 @@ async def respond_to_ai_mention(
             None, lambda: find_best_channel(query=query, channels=channels)
         )
         logger.info("triage phase=navigation_match_done channel_id_match=%s", match.get("channel_id"))
-        if match.get("channel_id"):
+        if match.get("channel_id") and match.get("confidence") != "low":
             return {
                 "should_respond": False,
                 "navigation": {
@@ -1611,6 +1731,14 @@ async def respond_to_ai_mention(
                     "confidence": match.get("confidence", "medium"),
                     "reason": match.get("reason", ""),
                 },
+            }
+        if match.get("channel_id") and match.get("confidence") == "low":
+            return {
+                "should_respond": True,
+                "content": (
+                    f'I found a possible match for "{query}", but I need a more specific channel or '
+                    "workspace name before navigating."
+                ),
             }
         # No match found — fall through to normal response
         return {

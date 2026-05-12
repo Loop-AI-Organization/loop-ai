@@ -53,7 +53,7 @@ export default function AccountSettings() {
 
   useEffect(() => {
     if (user) setDisplayName(user.name);
-  }, [user?.id, user?.name]);
+  }, [user]);
 
   const handleSave = async () => {
     if (!user || !displayName.trim()) return;

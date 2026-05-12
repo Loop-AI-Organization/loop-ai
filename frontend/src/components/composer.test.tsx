@@ -3,7 +3,8 @@ import { act } from 'react';
 import { createRoot, Root } from 'react-dom/client';
 import { Composer } from '@/components/composer';
 import { useAppStore } from '@/store/app-store';
-import { insertMessage, triageAndRespond } from '@/lib/supabase-data';
+import { insertMessage, queryFiles, triageAndRespond } from '@/lib/supabase-data';
+import type { FileRecord } from '@/types';
 
 const mockNavigate = vi.fn();
 // Required for React 18 act() warnings in non-RTL test harnesses.
@@ -20,6 +21,7 @@ vi.mock('react-router-dom', async () => {
 vi.mock('@/lib/supabase-data', () => ({
   insertMessage: vi.fn(),
   uploadFile: vi.fn(),
+  queryFiles: vi.fn(),
   triageAndRespond: vi.fn(),
 }));
 
@@ -47,6 +49,7 @@ describe('Composer AI participation guards', () => {
       messages: [],
       orchestratorStatus: 'ready',
       pendingSubmit: null,
+      selectedFileContext: [],
     });
   });
 
@@ -139,4 +142,60 @@ describe('Composer AI participation guards', () => {
     expect(useAppStore.getState().messages).toHaveLength(1);
     expect(useAppStore.getState().messages[0]?.content).toBe('@ai draft a status update');
   });
+
+  it('answers against selected files instead of normal triage', async () => {
+    useAppStore.setState({
+      selectedFileContext: [fileRecord('file-1')],
+    });
+    vi.mocked(insertMessage).mockResolvedValue({
+      id: 'm-3',
+      threadId: 'pending-ch-1',
+      role: 'user',
+      content: '@ai summarize this file',
+      createdAt: new Date(),
+    });
+    vi.mocked(queryFiles).mockResolvedValue({
+      answer: 'The file describes the Sprint 2 release checklist.',
+      files: [{ id: 'file-1', name: 'release.md' }],
+    });
+
+    await renderComposer();
+    await act(async () => {
+      useAppStore.getState().setPendingSubmit('@ai summarize this file');
+    });
+    await act(async () => {
+      vi.runAllTimers();
+    });
+    await flush();
+
+    expect(queryFiles).toHaveBeenCalledWith('ws-1', ['file-1'], 'summarize this file');
+    expect(triageAndRespond).not.toHaveBeenCalled();
+    expect(useAppStore.getState().messages.at(-1)?.content).toBe('The file describes the Sprint 2 release checklist.');
+  });
+
+  it('names icon-only composer actions for assistive technology', async () => {
+    await renderComposer();
+
+    expect(container!.querySelector('button[aria-label="Attach file"]')).not.toBeNull();
+    expect(container!.querySelector('button[aria-label="Send message"]')).not.toBeNull();
+  });
 });
+
+function fileRecord(id: string): FileRecord {
+  return {
+    id,
+    workspaceId: 'ws-1',
+    source: 'generated',
+    storagePath: `ws-1/docs/${id}.md`,
+    fileName: 'release.md',
+    fileSize: 42,
+    contentType: 'text/markdown',
+    createdBy: 'user-1',
+    createdAt: new Date(),
+    summary: 'Release checklist',
+    projectContext: 'Sprint 2',
+    tags: ['release'],
+    metadataStatus: 'ready',
+    sourceChannelId: 'ch-1',
+  };
+}

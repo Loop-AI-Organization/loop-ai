@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Workspace, Channel, Message, Action, OrchestratorStatus, ThreadSettings, Task } from '@/types';
+import type { Workspace, Channel, Message, Action, OrchestratorStatus, ThreadSettings, Task, FileRecord } from '@/types';
 import type { ContextItem, FileItem, User } from '@/types';
 
 interface AppState {
@@ -17,6 +17,7 @@ interface AppState {
   actions: Action[];
   contextItems: ContextItem[];
   files: FileItem[];
+  selectedFileContext: FileRecord[];
 
   tasks: Task[];
 
@@ -66,7 +67,9 @@ interface AppState {
   setStreamingMessageId: (id: string | null) => void;
 
   toggleInspector: () => void;
+  setInspectorOpen: (open: boolean) => void;
   toggleSidebar: () => void;
+  setSidebarOpen: (open: boolean) => void;
   setCommandPaletteOpen: (open: boolean) => void;
 
   updateThreadSettings: (settings: Partial<ThreadSettings>) => void;
@@ -74,6 +77,9 @@ interface AppState {
   setTasks: (tasks: Task[]) => void;
   upsertTask: (task: Task) => void;
   removeTask: (taskId: string) => void;
+  addSelectedFileContext: (file: FileRecord) => void;
+  removeSelectedFileContext: (fileId: string) => void;
+  clearSelectedFileContext: () => void;
 
   // Clarification flow: set to a message string to auto-submit from the Composer
   pendingSubmit: string | null;
@@ -100,6 +106,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   actions: [],
   contextItems: [],
   files: [],
+  selectedFileContext: [],
   tasks: [],
   pendingSubmit: null,
 
@@ -177,7 +184,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   setStreamingMessageId: (id) => set({ streamingMessageId: id }),
 
   toggleInspector: () => set((state) => ({ isInspectorOpen: !state.isInspectorOpen })),
+  setInspectorOpen: (open) => set({ isInspectorOpen: open }),
   toggleSidebar: () => set((state) => ({ isSidebarOpen: !state.isSidebarOpen })),
+  setSidebarOpen: (open) => set({ isSidebarOpen: open }),
   setCommandPaletteOpen: (open) => set({ isCommandPaletteOpen: open }),
 
   updateThreadSettings: (settings) =>
@@ -197,6 +206,18 @@ export const useAppStore = create<AppState>((set, get) => ({
     }),
   removeTask: (taskId) =>
     set((state) => ({ tasks: state.tasks.filter((t) => t.id !== taskId) })),
+  addSelectedFileContext: (file) =>
+    set((state) => {
+      if (state.selectedFileContext.some((item) => item.id === file.id)) {
+        return state;
+      }
+      return { selectedFileContext: [...state.selectedFileContext, file] };
+    }),
+  removeSelectedFileContext: (fileId) =>
+    set((state) => ({
+      selectedFileContext: state.selectedFileContext.filter((file) => file.id !== fileId),
+    })),
+  clearSelectedFileContext: () => set({ selectedFileContext: [] }),
 
   markChannelAsRead: (channelId) =>
     set((state) => ({

@@ -4,7 +4,7 @@ import { FileCard } from '@/components/file-card';
 import { TaskCard } from '@/components/task-card';
 import { ClarifyCard } from '@/components/clarify-card';
 import { User, Bot, Trash2 } from 'lucide-react';
-import { useRef, useEffect, useState } from 'react';
+import { useRef, useEffect, useMemo, useState } from 'react';
 import { useAppStore } from '@/store/app-store';
 import { getSupabase } from '@/lib/supabase';
 
@@ -174,10 +174,15 @@ function parseMarkers(content: string): Segment[] {
 }
 
 function MessageContent({ content, files }: { content: string; files?: FileRecord[] }) {
-  const segments = parseMarkers(content);
-  const fileIds = segments.filter((s): s is { type: 'file'; id: string } => s.type === 'file').map((s) => s.id);
-  const taskIds = segments.filter((s): s is { type: 'task'; id: string } => s.type === 'task').map((s) => s.id);
-  const clarifySegments = segments.filter((s): s is { type: 'clarify'; attrs: Record<string, string> } => s.type === 'clarify');
+  const segments = useMemo(() => parseMarkers(content), [content]);
+  const fileIds = useMemo(
+    () => segments.filter((s): s is { type: 'file'; id: string } => s.type === 'file').map((s) => s.id),
+    [segments]
+  );
+  const taskIds = useMemo(
+    () => segments.filter((s): s is { type: 'task'; id: string } => s.type === 'task').map((s) => s.id),
+    [segments]
+  );
 
   const storeTasks = useAppStore((s) => s.tasks);
   const upsertTask = useAppStore((s) => s.upsertTask);
@@ -208,13 +213,15 @@ function MessageContent({ content, files }: { content: string; files?: FileRecor
       }
       for (const t of storeTasks) {
         if (taskIds.includes(t.id)) {
-          next.set(t.id, t);
-          changed = true;
+          if (next.get(t.id) !== t) {
+            next.set(t.id, t);
+            changed = true;
+          }
         }
       }
       return changed ? next : prev;
     });
-  }, [storeTasks]);
+  }, [storeTasks, taskIds]);
 
   useEffect(() => {
     if (fileIds.length === 0) return;
@@ -229,9 +236,12 @@ function MessageContent({ content, files }: { content: string; files?: FileRecor
       .in('id', missing)
       .then(({ data }) => {
         if (cancelled || !data) return;
+        if (data.length === 0) return;
         setResolvedFiles((prev) => {
           const next = new Map(prev);
+          let changed = false;
           for (const r of data) {
+            if (next.has(r.id)) continue;
             next.set(r.id, {
               id: r.id,
               workspaceId: r.workspace_id,
@@ -248,12 +258,13 @@ function MessageContent({ content, files }: { content: string; files?: FileRecor
               metadataStatus: r.metadata_status,
               sourceChannelId: r.source_channel_id,
             });
+            changed = true;
           }
-          return next;
+          return changed ? next : prev;
         });
       });
     return () => { cancelled = true; };
-  }, [content]);
+  }, [fileIds, resolvedFiles]);
 
   useEffect(() => {
     if (taskIds.length === 0) return;
@@ -268,37 +279,41 @@ function MessageContent({ content, files }: { content: string; files?: FileRecor
       .in('id', missing)
       .then(({ data }) => {
         if (cancelled || !data) return;
+        const fetchedTasks: Task[] = data.map((r) => ({
+          id: r.id,
+          workspaceId: r.workspace_id,
+          channelId: r.channel_id,
+          title: r.title,
+          description: r.description,
+          status: r.status,
+          dueDate: r.due_date ? new Date(r.due_date) : null,
+          sourceMessageId: r.source_message_id,
+          createdBy: r.created_by,
+          createdAt: new Date(r.created_at),
+          updatedAt: new Date(r.updated_at),
+          assignees: (r.task_assignees ?? []).map((a: TaskAssignee & { task_id: string; added_at: string }) => ({
+            taskId: a.task_id ?? r.id,
+            displayName: a.displayName ?? (a as unknown as Record<string, string>).display_name,
+            userId: a.userId ?? (a as unknown as Record<string, string | null>).user_id,
+            addedBy: a.addedBy ?? (a as unknown as Record<string, string | null>).added_by,
+            addedAt: new Date((a as unknown as Record<string, string>).added_at ?? Date.now()),
+          })),
+        }));
+        if (fetchedTasks.length === 0) return;
         setResolvedTasks((prev) => {
           const next = new Map(prev);
-          for (const r of data) {
-            const task: Task = {
-              id: r.id,
-              workspaceId: r.workspace_id,
-              channelId: r.channel_id,
-              title: r.title,
-              description: r.description,
-              status: r.status,
-              dueDate: r.due_date ? new Date(r.due_date) : null,
-              sourceMessageId: r.source_message_id,
-              createdBy: r.created_by,
-              createdAt: new Date(r.created_at),
-              updatedAt: new Date(r.updated_at),
-              assignees: (r.task_assignees ?? []).map((a: TaskAssignee & { task_id: string; added_at: string }) => ({
-                taskId: a.task_id ?? r.id,
-                displayName: a.displayName ?? (a as unknown as Record<string, string>).display_name,
-                userId: a.userId ?? (a as unknown as Record<string, string | null>).user_id,
-                addedBy: a.addedBy ?? (a as unknown as Record<string, string | null>).added_by,
-                addedAt: new Date((a as unknown as Record<string, string>).added_at ?? Date.now()),
-              })),
-            };
-            next.set(r.id, task);
-            upsertTask(task);
+          let changed = false;
+          for (const task of fetchedTasks) {
+            if (next.get(task.id) === task) continue;
+            next.set(task.id, task);
+            changed = true;
           }
-          return next;
+          return changed ? next : prev;
         });
+        fetchedTasks.forEach(upsertTask);
       });
     return () => { cancelled = true; };
-  }, [content]);
+  }, [resolvedTasks, taskIds, upsertTask]);
 
   return (
     <>

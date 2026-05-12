@@ -3,7 +3,7 @@ import { act } from 'react';
 import { createRoot, Root } from 'react-dom/client';
 import { InspectorPanel } from '@/components/inspector-panel';
 import { useAppStore } from '@/store/app-store';
-import { exportChannelTasks, fetchChannelTasks, fetchWorkspaceFiles } from '@/lib/supabase-data';
+import { exportChannelTasks, fetchChannelTasks, fetchWorkspaceFiles, updateChannelSettings } from '@/lib/supabase-data';
 import type { FileRecord, Task, TaskStatus } from '@/types';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -109,6 +109,36 @@ describe('InspectorPanel task export', () => {
     const button = exportButton();
     expect(button).toBeDisabled();
     expect(button.title).toBe('Confirm at least one task before exporting');
+  });
+
+  it('saves restricted mode and participation as separate settings', async () => {
+    vi.mocked(updateChannelSettings).mockResolvedValue({
+      id: 'ch-1',
+      workspaceId: 'ws-1',
+      name: 'Sprint 3',
+      type: 'project',
+      isLlmRestricted: true,
+      llmParticipationEnabled: true,
+      unreadCount: 0,
+    });
+
+    await renderPanel();
+
+    const restrictSwitch = container!.querySelector('[data-testid="restricted-llm-switch"]') as HTMLButtonElement | null;
+    if (!restrictSwitch) throw new Error('Restricted switch not found');
+    await act(async () => {
+      restrictSwitch.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    expect(updateChannelSettings).toHaveBeenCalledWith('ch-1', { isLlmRestricted: true });
+  });
+
+  it('does not say AI is blocked when restricted mode is off', async () => {
+    await renderPanel();
+
+    expect(container!.textContent).toContain('Channel policy allows AI when participation is on.');
+    expect(container!.textContent).not.toContain('Channel policy: AI replies are blocked.');
   });
 
   it('exports confirmed tasks and refreshes workspace files', async () => {

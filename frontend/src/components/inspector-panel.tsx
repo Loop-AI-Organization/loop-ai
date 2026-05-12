@@ -209,7 +209,7 @@ export function InspectorPanel() {
       cancelled = true;
       supabase.removeChannel(sub);
     };
-  }, [currentChannelId]);
+  }, [currentChannelId, removeTask, setTasks, upsertTask]);
 
   const channelTasks = tasks.filter((t) => t.channelId === currentChannelId);
   const proposedTasks = channelTasks.filter((t) => t.status === 'proposed');
@@ -318,17 +318,41 @@ export function InspectorPanel() {
               <div className="min-w-0">
                 <Label className="text-xs flex items-center gap-1.5">
                   <BotOff className="w-3.5 h-3.5" />
-                  Restrict AI
+                  Restricted-LLM mode
                 </Label>
-                <p className="text-2xs text-muted-foreground">On: AI replies are blocked. Off: AI replies are allowed.</p>
+                <p className="text-2xs text-muted-foreground">
+                  {currentChannel?.isLlmRestricted
+                    ? 'Channel policy blocks AI replies.'
+                    : 'Channel policy allows AI when participation is on.'}
+                </p>
               </div>
               <Switch
-                checked={(currentChannel?.isLlmRestricted ?? false) || (currentChannel?.llmParticipationEnabled === false)}
+                data-testid="restricted-llm-switch"
+                checked={currentChannel?.isLlmRestricted ?? false}
                 disabled={!currentChannel || settingsSaving}
                 onCheckedChange={(checked) =>
                   saveChannelSettings({
                     isLlmRestricted: checked,
-                    llmParticipationEnabled: !checked,
+                  })
+                }
+              />
+            </div>
+
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <Label className="text-xs flex items-center gap-1.5">
+                  <Brain className="w-3.5 h-3.5" />
+                  AI participates
+                </Label>
+                <p className="text-2xs text-muted-foreground">Conversation setting used when policy allows AI.</p>
+              </div>
+              <Switch
+                data-testid="llm-participation-switch"
+                checked={currentChannel?.llmParticipationEnabled ?? true}
+                disabled={!currentChannel || settingsSaving || currentChannel?.isLlmRestricted === true}
+                onCheckedChange={(checked) =>
+                  saveChannelSettings({
+                    llmParticipationEnabled: checked,
                   })
                 }
               />

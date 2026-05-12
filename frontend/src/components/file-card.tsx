@@ -6,9 +6,11 @@ import {
   FileCode,
   Download,
   Loader2,
+  MessageSquareText,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { getFileDownloadUrl } from '@/lib/supabase-data';
+import { useAppStore } from '@/store/app-store';
 import type { FileRecord } from '@/types';
 import { cn } from '@/lib/utils';
 
@@ -33,7 +35,9 @@ interface FileCardProps {
 
 export function FileCard({ file }: FileCardProps) {
   const [downloading, setDownloading] = useState(false);
+  const { selectedFileContext, addSelectedFileContext } = useAppStore();
   const Icon = getFileIcon(file.contentType);
+  const isSelected = selectedFileContext.some((item) => item.id === file.id);
 
   const handleDownload = async () => {
     setDownloading(true);
@@ -48,12 +52,12 @@ export function FileCard({ file }: FileCardProps) {
   };
 
   return (
-    <div className="flex items-center gap-3 p-3 my-1 rounded-lg border border-border bg-muted/30 max-w-md">
+    <div className="grid w-full min-w-0 grid-cols-[2.25rem_minmax(0,1fr)_4.5rem] items-center gap-3 p-3 my-1 rounded-lg border border-border bg-muted/30">
       <div className="w-9 h-9 rounded-md bg-muted flex items-center justify-center flex-shrink-0">
         <Icon className="w-4 h-4 text-muted-foreground" />
       </div>
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 items-center gap-2">
           <p className="text-sm font-medium truncate">{file.fileName}</p>
           <span
             className={cn(
@@ -86,20 +90,34 @@ export function FileCard({ file }: FileCardProps) {
           )}
         </div>
       </div>
-      <Button
-        variant="ghost"
-        size="icon"
-        className="h-8 w-8 flex-shrink-0"
-        onClick={handleDownload}
-        disabled={downloading}
-        title="Download"
-      >
-        {downloading ? (
-          <Loader2 className="w-4 h-4 animate-spin" />
-        ) : (
-          <Download className="w-4 h-4" />
-        )}
-      </Button>
+      <div className="flex w-[4.5rem] shrink-0 items-center justify-end gap-1 justify-self-end">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8"
+          onClick={() => addSelectedFileContext(file)}
+          disabled={isSelected}
+          title={isSelected ? 'Selected for questions' : 'Ask about this file'}
+          aria-label={isSelected ? 'Selected for questions' : 'Ask about this file'}
+        >
+          <MessageSquareText className="w-4 h-4" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8"
+          onClick={handleDownload}
+          disabled={downloading}
+          title="Download"
+          aria-label="Download"
+        >
+          {downloading ? (
+            <Loader2 className="w-4 h-4 animate-spin" />
+          ) : (
+            <Download className="w-4 h-4" />
+          )}
+        </Button>
+      </div>
     </div>
   );
 }

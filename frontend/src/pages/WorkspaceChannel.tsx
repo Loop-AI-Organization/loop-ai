@@ -107,7 +107,6 @@ export default function WorkspaceChannel() {
         if (useAppStore.getState().currentChannelId === channelId) {
           useAppStore.setState({ messages: cachedMessages });
         }
-        return;
       }
 
       const msgs = await fetchMessages(channelId!);
@@ -124,7 +123,7 @@ export default function WorkspaceChannel() {
     return () => {
       cancelled = true;
     };
-  }, [workspaceId, channelId, dataLoading, navigate]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [workspaceId, channelId, dataLoading, navigate]);
 
   return <AppShell />;
 }

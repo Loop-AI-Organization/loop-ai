@@ -12,6 +12,7 @@ import { useRealtimeMessages } from '@/hooks/use-realtime-messages';
 import { useAppStore } from '@/store/app-store';
 import { acceptWorkspaceInvite, fetchChannels } from '@/lib/supabase-data';
 import { cn } from '@/lib/utils';
+import { useIsMobile } from '@/hooks/use-mobile';
 
 export function AppShell() {
   useKeyboardShortcuts();
@@ -20,13 +21,19 @@ export function AppShell() {
   const [searchParams, setSearchParams] = useSearchParams();
   const dataLoading = useAppStore((s) => s.dataLoading);
   const acceptInviteDone = useRef(false);
+  const isMobile = useIsMobile();
 
   const {
     actions,
     currentChannelId,
     isInspectorOpen,
     isSidebarOpen,
+    setInspectorOpen,
   } = useAppStore();
+
+  useEffect(() => {
+    setInspectorOpen(!isMobile);
+  }, [isMobile, setInspectorOpen]);
 
   // After sign-up from invite link: ?workspace_id=...&invited=1 → accept invite and go to workspace
   useEffect(() => {
