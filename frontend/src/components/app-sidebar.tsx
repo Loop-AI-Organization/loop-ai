@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { WorkspaceSwitcher } from './workspace-switcher';
 import { ChannelList } from './channel-list';
@@ -6,10 +7,16 @@ import { useAppStore } from '@/store/app-store';
 import { cn } from '@/lib/utils';
 import { X, Settings } from 'lucide-react';
 import { Button } from './ui/button';
+import { useIsMobile } from '@/hooks/use-mobile';
 
 export function AppSidebar() {
   const navigate = useNavigate();
-  const { isSidebarOpen, toggleSidebar, currentWorkspaceId } = useAppStore();
+  const { isSidebarOpen, toggleSidebar, setSidebarOpen, currentWorkspaceId } = useAppStore();
+  const isMobile = useIsMobile();
+
+  useEffect(() => {
+    setSidebarOpen(!isMobile);
+  }, [isMobile, setSidebarOpen]);
 
   return (
     <>

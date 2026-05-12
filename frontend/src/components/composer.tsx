@@ -1,10 +1,11 @@
 import { useState, useRef, useEffect, KeyboardEvent } from 'react';
-import { Send, Paperclip, Bot, Zap, Navigation } from 'lucide-react';
+import { Send, Paperclip, Bot, Zap, Navigation, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '@/store/app-store';
 import {
   insertMessage as insertMessageInSupabase,
   uploadFile,
+  queryFiles,
   triageAndRespond,
 } from '@/lib/supabase-data';
 import { Button } from '@/components/ui/button';
@@ -19,6 +20,7 @@ export function Composer() {
   const navigate = useNavigate();
   const [value, setValue] = useState('');
   const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const handleSubmitRef = useRef<() => void>(() => {});
@@ -38,6 +40,9 @@ export function Composer() {
     setOrchestratorStatus,
     pendingSubmit,
     setPendingSubmit,
+    selectedFileContext,
+    removeSelectedFileContext,
+    clearSelectedFileContext,
   } = useAppStore();
   const currentChannel = channels.find((channel) => channel.id === currentChannelId) ?? null;
   const aiResponsesDisabled =
@@ -49,7 +54,7 @@ export function Composer() {
     setValue(pendingSubmit);
     setPendingSubmit(null);
     setTimeout(() => handleSubmitRef.current(), 0);
-  }, [pendingSubmit]);
+  }, [pendingSubmit, setPendingSubmit]);
 
   // Auto-resize textarea
   useEffect(() => {
@@ -88,6 +93,36 @@ export function Composer() {
 
     // --- @ai was mentioned: get AI response ---
     setOrchestratorStatus('thinking');
+
+    if (selectedFileContext.length > 0 && currentWorkspaceId) {
+      const question = content.replace(/@ai\b/i, '').trim() || content;
+      try {
+        const result = await queryFiles(
+          currentWorkspaceId,
+          selectedFileContext.map((file) => file.id),
+          question
+        );
+        addMessage({
+          id: `msg-file-query-${Date.now()}`,
+          threadId: `pending-${currentChannelId}`,
+          role: 'assistant',
+          content: result.answer,
+          createdAt: new Date(),
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'File query failed';
+        addMessage({
+          id: `msg-file-query-err-${Date.now()}`,
+          threadId: `pending-${currentChannelId}`,
+          role: 'assistant',
+          content: `[File Query Error] ${message}`,
+          createdAt: new Date(),
+        });
+      } finally {
+        setOrchestratorStatus('ready');
+      }
+      return;
+    }
 
     // Build message history for context
     const { messages: stateMessages } = useAppStore.getState();
@@ -148,6 +183,7 @@ export function Composer() {
     if (!file || !currentChannelId || !currentWorkspaceId) return;
 
     setUploading(true);
+    setUploadError(null);
     try {
       const uploaded = await uploadFile(currentWorkspaceId, currentChannelId, file);
       const content = `:::file{id="${uploaded.id}"}`;
@@ -155,6 +191,7 @@ export function Composer() {
       addMessage({ ...msg, files: [uploaded] });
     } catch (err) {
       console.error('Upload failed:', err);
+      setUploadError(err instanceof Error ? err.message : 'Upload failed');
     } finally {
       setUploading(false);
     }
@@ -201,6 +238,38 @@ export function Composer() {
         </div>
       )}
 
+      {selectedFileContext.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          {selectedFileContext.map((file) => (
+            <button
+              key={file.id}
+              type="button"
+              className="inline-flex max-w-[12rem] items-center gap-1 rounded-md border border-border bg-muted px-2 py-1 text-2xs text-muted-foreground"
+              onClick={() => removeSelectedFileContext(file.id)}
+              title={`Remove ${file.fileName}`}
+            >
+              <span className="truncate">{file.fileName}</span>
+              <X className="h-3 w-3 shrink-0" />
+            </button>
+          ))}
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-6 px-2 text-2xs"
+            onClick={clearSelectedFileContext}
+          >
+            Clear
+          </Button>
+        </div>
+      )}
+
+      {uploadError && (
+        <div role="alert" className="text-xs text-destructive">
+          {uploadError}
+        </div>
+      )}
+
       {/* Composer box */}
       <div className="relative bg-background border border-border rounded-lg focus-within:border-primary focus-within:ring-1 focus-within:ring-primary/20 transition-all">
         <Textarea
@@ -228,6 +297,7 @@ export function Composer() {
             size="icon"
             className="h-8 w-8"
             title="Attach file"
+            aria-label="Attach file"
             disabled={!currentChannelId || !currentWorkspaceId || uploading}
             onClick={handleAttachFile}
           >
@@ -237,6 +307,7 @@ export function Composer() {
             size="icon"
             className="h-8 w-8"
             onClick={handleSubmit}
+            aria-label="Send message"
             disabled={!value.trim() || orchestratorStatus !== 'ready'}
           >
             <Send className="w-4 h-4" />

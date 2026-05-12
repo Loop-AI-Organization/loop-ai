@@ -35,6 +35,11 @@ function writeSettledCache<T>(key: string, value: T) {
   settledRequestCache.set(key, { value, expiresAt: Date.now() + REQUEST_CACHE_TTL_MS });
 }
 
+function invalidateRequest(key: string) {
+  settledRequestCache.delete(key);
+  inflightRequests.delete(key);
+}
+
 async function dedupeRequest<T>(key: string, loader: () => Promise<T>): Promise<T> {
   const cached = readSettledCache<T>(key);
   if (cached !== null) return cached;
@@ -133,6 +138,32 @@ function toMessage(r: MessageRow): Message {
   };
 }
 
+function isMissingOwnerProfileError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const record = error as { code?: string; message?: string; details?: string };
+  const text = `${record.message ?? ''} ${record.details ?? ''}`.toLowerCase();
+  return (
+    record.code === '23503' &&
+    text.includes('workspaces_owner_id_fkey') &&
+    text.includes('profiles')
+  );
+}
+
+async function ensureCurrentUserProfile(
+  supabase: ReturnType<typeof getSupabase>,
+  user: { id: string; email?: string; user_metadata?: { full_name?: string } }
+): Promise<void> {
+  const fallbackName = user.user_metadata?.full_name ?? user.email?.split('@')[0] ?? 'User';
+  try {
+    await supabase
+      .from('profiles')
+      .upsert({ id: user.id, first_name: fallbackName }, { onConflict: 'id' });
+  } catch {
+    // Older/local schemas may not have profiles. Workspace creation below is
+    // still valid there because no owner_id -> profiles FK exists.
+  }
+}
+
 /**
  * Update the current user's profile display name in Supabase Auth user_metadata.
  */
@@ -206,16 +237,25 @@ export async function createWorkspace(params: { name?: string; icon?: string }):
   const supabase = getSupabase();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Not authenticated');
-  const { data, error } = await supabase
-    .from('workspaces')
-    .insert({
-      user_id: user.id,
-      owner_id: user.id,
-      name: params.name ?? 'My Workspace',
-      icon: params.icon ?? '◎',
-    })
-    .select('id, user_id, owner_id, name, icon, created_at')
-    .single();
+  await ensureCurrentUserProfile(supabase, user);
+
+  const insertWorkspace = () =>
+    supabase
+      .from('workspaces')
+      .insert({
+        user_id: user.id,
+        owner_id: user.id,
+        name: params.name ?? 'My Workspace',
+        icon: params.icon ?? '◎',
+      })
+      .select('id, user_id, owner_id, name, icon, created_at')
+      .single();
+
+  let { data, error } = await insertWorkspace();
+  if (isMissingOwnerProfileError(error)) {
+    await ensureCurrentUserProfile(supabase, user);
+    ({ data, error } = await insertWorkspace());
+  }
   if (error) throw error;
   const workspace = toWorkspace(data as WorkspaceRow);
   // Best-effort: add owner row to workspace_members. The workspace is already
@@ -606,6 +646,9 @@ export async function deleteMessage(messageId: string): Promise<void> {
     .delete()
     .eq('id', messageId);
   if (error) throw error;
+  settledRequestCache.forEach((_value, key) => {
+    if (key.startsWith('messages:')) settledRequestCache.delete(key);
+  });
 }
 
 export async function updateChannel(channelId: string, name: string): Promise<Channel> {
@@ -688,6 +731,7 @@ export async function insertMessage(channelId: string, role: Message['role'], co
     .single();
   if (error) throw error;
   if (role === 'user') {
+    invalidateRequest(`messages:${channelId}`);
     refreshChannelSummary(channelId).catch(() => undefined);
   }
   return toMessage(data as MessageRow);
@@ -830,6 +874,31 @@ export async function searchFilesAi(
   return {
     files: (body.files as FileRow[]).map(toFileRecord),
     intent: body.intent,
+  };
+}
+
+export async function queryFiles(
+  workspaceId: string,
+  fileIds: string[],
+  question: string
+): Promise<{ answer: string; files: Array<{ id: string; name: string }> }> {
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${API_URL}/api/files/query`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      workspace_id: workspaceId,
+      file_ids: fileIds,
+      question,
+    }),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(body.detail ?? body.message ?? `Failed to query files (${res.status})`);
+  }
+  return {
+    answer: String(body.answer ?? ''),
+    files: Array.isArray(body.files) ? body.files : [],
   };
 }
 

@@ -51,9 +51,9 @@ class TaskDeleteRouteTest(unittest.TestCase):
         self.assertEqual(supabase.queried_tables, ["tasks"])
 
     def test_delete_existing_proposed_task_records_rejection_then_deletes(self):
-        supabase = _Supabase([{"id": "task-1", "status": "proposed"}])
+        supabase = _Supabase([{"id": "task-1", "status": "proposed", "channel_id": "ch-1"}])
 
-        with patch("app.routes.supabase", supabase):
+        with patch("app.routes.supabase", supabase), patch("app.routes._require_channel_access", return_value={}):
             result = asyncio.run(delete_task("task-1", {"sub": "user-1"}))
 
         self.assertEqual(result, {"ok": True})
