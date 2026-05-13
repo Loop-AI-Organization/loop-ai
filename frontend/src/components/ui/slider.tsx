@@ -1,6 +1,5 @@
 import * as React from "react";
 import * as SliderPrimitive from "@radix-ui/react-slider";
-
 import { cn } from "@/lib/utils";
 
 const Slider = React.forwardRef<
@@ -9,13 +8,24 @@ const Slider = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <SliderPrimitive.Root
     ref={ref}
-    className={cn("relative flex w-full touch-none select-none items-center", className)}
+    className={cn(
+      "relative flex w-full touch-none select-none items-center py-2",
+      className
+    )}
     {...props}
   >
-    <SliderPrimitive.Track className="relative h-2 w-full grow overflow-hidden rounded-full bg-secondary">
-      <SliderPrimitive.Range className="absolute h-full bg-primary" />
+    <SliderPrimitive.Track className="relative h-1.5 w-full grow overflow-hidden rounded-full bg-secondary shadow-[inset_0_1px_2px_rgba(0,0,0,0.1)] dark:bg-secondary/80">
+      <SliderPrimitive.Range className="absolute h-full bg-primary shadow-md" />
     </SliderPrimitive.Track>
-    <SliderPrimitive.Thumb className="block h-5 w-5 rounded-full border-2 border-primary bg-background ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50" />
+    <SliderPrimitive.Thumb
+      className={cn(
+        "relative block h-5 w-5 rounded-full border-2 border-primary bg-background",
+        "shadow-lg shadow-primary/25 transition-all",
+        "hover:scale-110 hover:shadow-xl hover:shadow-primary/30",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+        "disabled:pointer-events-none disabled:opacity-50"
+      )}
+    />
   </SliderPrimitive.Root>
 ));
 Slider.displayName = SliderPrimitive.Root.displayName;
