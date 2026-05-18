@@ -7,6 +7,7 @@ import { PublicOnlyRoute } from "@/components/PublicOnlyRoute";
 import { ProtectedAppBootstrap } from "@/components/ProtectedAppBootstrap";
 import { isSupabaseConfigured } from "@/lib/supabase";
 import AppPage from "./pages/App";
+import PromptPage from "./pages/PromptPage";
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
 import ForgotPassword from "./pages/ForgotPassword";
@@ -44,7 +45,7 @@ const App = () => {
 
           {/* Main app (protected + bootstrapped) */}
           <Route path="/app" element={<ProtectedAppBootstrap />}>
-            <Route index element={<AppPage />} />
+            <Route index element={<PromptPage />} />
             <Route path="account" element={<AccountSettings />} />
             <Route path=":workspaceId/:channelId" element={<WorkspaceChannel />} />
             <Route path=":workspaceId/settings" element={<WorkspaceSettings />} />
