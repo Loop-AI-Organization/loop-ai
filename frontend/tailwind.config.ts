@@ -115,6 +115,30 @@ export default {
           from: { transform: "translateX(-100%)", opacity: "0" },
           to: { transform: "translateX(0)", opacity: "1" },
         },
+        "slide-in-from-top": {
+          from: { transform: "translateY(-100%)", opacity: "0" },
+          to: { transform: "translateY(0)", opacity: "1" },
+        },
+        "slide-in-from-bottom": {
+          from: { transform: "translateY(100%)", opacity: "0" },
+          to: { transform: "translateY(0)", opacity: "1" },
+        },
+        "slide-out-to-top": {
+          from: { transform: "translateY(0)", opacity: "1" },
+          to: { transform: "translateY(-100%)", opacity: "0" },
+        },
+        "slide-out-to-bottom": {
+          from: { transform: "translateY(0)", opacity: "1" },
+          to: { transform: "translateY(100%)", opacity: "0" },
+        },
+        "slide-out-to-right": {
+          from: { transform: "translateX(0)", opacity: "1" },
+          to: { transform: "translateX(100%)", opacity: "0" },
+        },
+        "slide-out-to-left": {
+          from: { transform: "translateX(0)", opacity: "1" },
+          to: { transform: "translateX(-100%)", opacity: "0" },
+        },
         "fade-in": {
           from: { opacity: "0" },
           to: { opacity: "1" },
@@ -123,6 +147,27 @@ export default {
           "0%": { width: "0" },
           "100%": { width: "100%" },
         },
+        "bounce-subtle": {
+          "0%, 100%": { transform: "translateY(0)" },
+          "50%": { transform: "translateY(-3px)" },
+        },
+        // Slide animations with offset (used by Radix UI)
+        "slide-in-from-top-2": {
+          from: { transform: "translateY(-8px)", opacity: "0" },
+          to: { transform: "translateY(0)", opacity: "1" },
+        },
+        "slide-in-from-bottom-2": {
+          from: { transform: "translateY(8px)", opacity: "0" },
+          to: { transform: "translateY(0)", opacity: "1" },
+        },
+        "slide-in-from-right-2": {
+          from: { transform: "translateX(8px)", opacity: "0" },
+          to: { transform: "translateX(0)", opacity: "1" },
+        },
+        "slide-in-from-left-2": {
+          from: { transform: "translateX(-8px)", opacity: "0" },
+          to: { transform: "translateX(0)", opacity: "1" },
+        },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
@@ -130,8 +175,19 @@ export default {
         "pulse-subtle": "pulse-subtle 2s ease-in-out infinite",
         "slide-in-right": "slide-in-right 0.2s ease-out",
         "slide-in-left": "slide-in-left 0.2s ease-out",
+        "slide-in-from-top": "slide-in-from-top 0.2s ease-out",
+        "slide-in-from-bottom": "slide-in-from-bottom 0.2s ease-out",
+        "slide-out-to-top": "slide-out-to-top 0.2s ease-out",
+        "slide-out-to-bottom": "slide-out-to-bottom 0.2s ease-out",
+        "slide-out-to-right": "slide-out-to-right 0.2s ease-out",
+        "slide-out-to-left": "slide-out-to-left 0.2s ease-out",
         "fade-in": "fade-in 0.15s ease-out",
         "typing": "typing 0.5s steps(40, end)",
+        "bounce-subtle": "bounce-subtle 0.6s ease-in-out infinite",
+        "slide-in-from-top-2": "slide-in-from-top-2 0.2s ease-out",
+        "slide-in-from-bottom-2": "slide-in-from-bottom-2 0.2s ease-out",
+        "slide-in-from-right-2": "slide-in-from-right-2 0.2s ease-out",
+        "slide-in-from-left-2": "slide-in-from-left-2 0.2s ease-out",
       },
       boxShadow: {
         "soft": "0 1px 2px 0 rgb(0 0 0 / 0.03), 0 1px 3px 0 rgb(0 0 0 / 0.04)",
