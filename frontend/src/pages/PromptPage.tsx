@@ -281,7 +281,15 @@ export default function PromptPage() {
                 selectedWorkspaceId={currentWorkspaceId || workspaceList[0]?.id}
                 onWorkspaceChange={handleWorkspaceSelect}
               >
-                <WorkspaceTrigger className="min-w-48 bg-neutral-900/80 border-neutral-700 hover:bg-neutral-800 hover:border-neutral-600" />
+                <WorkspaceTrigger
+                  renderTrigger={(workspace) => (
+                    <div className="flex items-center gap-2">
+                      <span className="truncate">{workspace.name}</span>
+                      <ChevronDownIcon className="h-4 w-4 shrink-0" />
+                    </div>
+                  )}
+                  className="rounded-lg shadow-sm shadow-black/5 bg-primary text-primary-foreground h-9 px-4 py-2 min-w-48"
+                />
                 <WorkspaceContent searchable title="Switch Workspace">
                   <Button
                     variant="ghost"
