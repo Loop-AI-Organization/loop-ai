@@ -3,6 +3,7 @@
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Link } from "react-router-dom";
+import { Typewriter } from "@/components/ui/typewriter";
 
 function FloatingPaths({ position }: { position: number }) {
     const paths = Array.from({ length: 36 }, (_, i) => ({
@@ -58,6 +59,12 @@ export function BackgroundPaths({
 }) {
     const words = title.split(" ");
 
+    const typewriterWords = [
+        "AI-native team messaging",
+        "Smart routing made simple",
+        "Collaborate in real-time"
+    ];
+
     return (
         <div className="relative min-h-screen w-full flex items-center justify-center overflow-hidden bg-black">
             <div className="absolute inset-0">
@@ -70,9 +77,10 @@ export function BackgroundPaths({
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     transition={{ duration: 2 }}
-                    className="max-w-4xl mx-auto"
+                    className="max-w-4xl mx-auto space-y-8"
                 >
-                    <h1 className="text-5xl sm:text-7xl md:text-8xl font-bold mb-8 tracking-tighter">
+                    {/* Title with letter animation - shown first */}
+                    <h1 className="text-5xl sm:text-7xl md:text-8xl font-bold tracking-tighter">
                         {words.map((word, wordIndex) => (
                             <span
                                 key={wordIndex}
@@ -100,6 +108,20 @@ export function BackgroundPaths({
                             </span>
                         ))}
                     </h1>
+
+                    {/* Typewriter tagline - loops through messages */}
+                    <motion.div
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: 0.8, duration: 0.6 }}
+                        className="flex justify-center"
+                    >
+                        <h2 className="text-xl sm:text-2xl md:text-3xl font-medium">
+                            <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#40bfae] to-[#7dd3c0]">
+                                <Typewriter words={typewriterWords} speed={80} delayBetweenWords={2500} cursor={true} cursorChar="|" />
+                            </span>
+                        </h2>
+                    </motion.div>
 
                     <div
                         className="inline-block group relative bg-gradient-to-b from-black/10 to-white/10
