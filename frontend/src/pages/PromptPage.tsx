@@ -4,11 +4,16 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import AnimatedGradientBackground from "@/components/ui/animated-gradient-background";
 import { PromptInputBox } from "@/components/ui/ai-prompt-box";
+import { Workspaces, WorkspaceTrigger, WorkspaceContent } from "@/components/ui/workspaces";
 import { useState, useRef, useEffect } from "react";
 import { useAppStore } from "@/store/app-store";
 import { streamAssistant, sendMessage } from "@/lib/api-client";
-import { Search, User, FolderOpen, MessageSquare, ArrowRight, Loader2, X } from "lucide-react";
+import { Search, User, FolderOpen, MessageSquare, ArrowRight, Loader2, X, PlusIcon } from "lucide-react";
 import type { Message } from "@/types";
+import type { Workspace } from "@/components/ui/workspaces";
+import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
+import { Button } from "@/components/ui/button";
+import { CheckIcon, ChevronDownIcon } from "lucide-react";
 
 interface ChatMessage {
   id: string;
@@ -87,6 +92,15 @@ export default function PromptPage() {
   const channels = useAppStore((s) => s.channels);
   const currentWorkspaceId = useAppStore((s) => s.currentWorkspaceId);
   const currentChannelId = useAppStore((s) => s.currentChannelId);
+
+  // Extended workspace type with logo
+  type WorkspaceWithLogo = Workspace & { logo?: string };
+
+  // Map stores workspaces to the format expected by the component
+  const workspaceList: WorkspaceWithLogo[] = workspaces.map((w) => ({
+    ...w,
+    logo: `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(w.name)}&backgroundColor=40bfae&textColor=ffffff`,
+  }));
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -230,6 +244,16 @@ export default function PromptPage() {
     setShowWelcome(true);
   };
 
+  const handleWorkspaceSelect = (workspace: Workspace) => {
+    const ws = workspace as WorkspaceWithLogo;
+    const workspaceChannels = channels.filter((c) => c.workspaceId === ws.id);
+    if (workspaceChannels.length > 0) {
+      navigate(`/app/${ws.id}/${workspaceChannels[0].id}`);
+    } else {
+      navigate(`/app/${ws.id}`);
+    }
+  };
+
   return (
     <div className="relative min-h-screen w-full bg-black overflow-hidden">
       <AnimatedGradientBackground />
@@ -249,32 +273,43 @@ export default function PromptPage() {
             <span className="text-neutral-100 font-semibold text-lg">Loop AI</span>
           </div>
 
-          <nav className="flex items-center gap-6">
-            <button
-              onClick={() => currentWorkspaceId && currentChannelId ? navigate(`/app/${currentWorkspaceId}/${currentChannelId}`) : navigate("/app")}
-              className="text-neutral-400 hover:text-neutral-100 text-sm transition-colors"
-            >
-              Dashboard
-            </button>
-            <button
-              onClick={() => {
-                if (workspaces.length > 0) {
-                  const firstWorkspace = workspaces[0];
-                  const workspaceChannels = channels.filter((c) => c.workspaceId === firstWorkspace.id);
-                  navigate(`/app/${firstWorkspace.id}/${workspaceChannels[0]?.id || ""}`);
-                }
-              }}
-              className="text-neutral-400 hover:text-neutral-100 text-sm transition-colors"
-            >
-              Workspaces
-            </button>
+          <div className="flex items-center gap-4">
+            {/* Workspace Switcher */}
+            {workspaceList.length > 0 ? (
+              <Workspaces
+                workspaces={workspaceList}
+                selectedWorkspaceId={currentWorkspaceId || workspaceList[0]?.id}
+                onWorkspaceChange={handleWorkspaceSelect}
+              >
+                <WorkspaceTrigger className="min-w-48 bg-neutral-900/80 border-neutral-700 hover:bg-neutral-800 hover:border-neutral-600" />
+                <WorkspaceContent searchable title="Switch Workspace">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-neutral-400 w-full justify-start hover:text-[#40bfae]"
+                    onClick={() => navigate("/app")}
+                  >
+                    <PlusIcon className="mr-2 h-4 w-4" />
+                    Create workspace
+                  </Button>
+                </WorkspaceContent>
+              </Workspaces>
+            ) : (
+              <button
+                onClick={() => navigate("/app")}
+                className="text-neutral-400 hover:text-neutral-100 text-sm transition-colors"
+              >
+                Dashboard
+              </button>
+            )}
+
             <button
               onClick={() => navigate("/app/account")}
               className="text-neutral-400 hover:text-neutral-100 text-sm transition-colors"
             >
               Settings
             </button>
-          </nav>
+          </div>
         </motion.header>
 
         {/* Main content */}
