@@ -6,6 +6,29 @@ import { ArrowDown, MessageSquare } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
+function TypingBubble() {
+  return (
+    <div className="flex items-center gap-3 px-4 py-3">
+      <div className="flex flex-col items-start gap-1 max-w-[60%]">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-medium">Loop AI</span>
+        </div>
+        <div className="rounded-xl px-3 py-2.5 bg-muted border border-border">
+          <div className="flex gap-1">
+            {[0, 1, 2].map((i) => (
+              <span
+                key={i}
+                className="w-2 h-2 rounded-full bg-primary animate-bounce-subtle"
+                style={{ animationDelay: `${i * 0.15}s`, animationDuration: '0.6s' }}
+              />
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function MessageList() {
   const { messages, currentChannelId, streamingMessageId } = useAppStore();
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -99,6 +122,7 @@ export function MessageList() {
                 isStreaming={message.id === streamingMessageId}
               />
             ))}
+            {streamingMessageId && <TypingBubble />}
           </div>
         )}
       </div>
