@@ -4,19 +4,20 @@ import { Link } from "react-router-dom";
 import { BackgroundPaths } from "@/components/ui/background-paths";
 import { ContainerScroll } from "@/components/ui/container-scroll-animation";
 import { Button } from "@/components/ui/button";
+import { LampContainer } from "@/components/ui/lamp";
 
 function ChatUIDemo() {
   return (
-    <div className="w-full h-full bg-neutral-900 rounded-xl flex flex-col overflow-hidden">
+    <div className="w-full h-full bg-black rounded-xl flex flex-col overflow-hidden border border-[#40bfae]/20">
       {/* Header */}
       <div className="px-4 py-3 border-b border-neutral-800 flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <div className="w-3 h-3 rounded-full bg-red-500" />
-          <span className="text-neutral-400 text-sm font-medium">general</span>
+          <div className="w-3 h-3 rounded-full bg-[#40bfae]" />
+          <span className="text-neutral-300 text-sm font-medium">general</span>
         </div>
         <div className="flex items-center gap-2">
-          <div className="w-4 h-4 rounded border border-neutral-700 flex items-center justify-center">
-            <span className="text-neutral-500 text-xs">?</span>
+          <div className="w-4 h-4 rounded border border-[#40bfae]/30 flex items-center justify-center">
+            <span className="text-[#40bfae] text-xs">?</span>
           </div>
         </div>
       </div>
@@ -25,13 +26,13 @@ function ChatUIDemo() {
       <div className="flex-1 p-4 space-y-4 overflow-hidden">
         {/* AI Message */}
         <div className="flex gap-3">
-          <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex-shrink-0" />
+          <div className="w-8 h-8 rounded-full bg-[#40bfae] flex-shrink-0" />
           <div className="flex-1 space-y-2">
             <div className="flex items-center gap-2">
-              <span className="text-white text-sm font-medium">Loop AI</span>
+              <span className="text-[#40bfae] text-sm font-medium">Loop AI</span>
               <span className="text-neutral-500 text-xs">just now</span>
             </div>
-            <div className="bg-neutral-800 rounded-2xl rounded-tl-md p-3 max-w-md">
+            <div className="bg-neutral-900 rounded-2xl rounded-tl-md p-3 max-w-md border border-[#40bfae]/20">
               <p className="text-neutral-100 text-sm">
                 Hi! I am your AI assistant. How can I help you today?
               </p>
@@ -44,26 +45,26 @@ function ChatUIDemo() {
           <div className="flex-1 space-y-2 items-end flex flex-col">
             <div className="flex items-center gap-2">
               <span className="text-neutral-500 text-xs">just now</span>
-              <span className="text-white text-sm font-medium">You</span>
+              <span className="text-neutral-300 text-sm font-medium">You</span>
             </div>
-            <div className="bg-blue-600 rounded-2xl rounded-tr-md p-3 max-w-md">
-              <p className="text-white text-sm">
+            <div className="bg-[#40bfae] rounded-2xl rounded-tr-md p-3 max-w-md">
+              <p className="text-black text-sm font-medium">
                 Can you help me understand the project architecture?
               </p>
             </div>
           </div>
-          <div className="w-8 h-8 rounded-full bg-gradient-to-br from-green-500 to-teal-600 flex-shrink-0" />
+          <div className="w-8 h-8 rounded-full bg-neutral-700 flex-shrink-0" />
         </div>
 
         {/* AI Response */}
         <div className="flex gap-3">
-          <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex-shrink-0" />
+          <div className="w-8 h-8 rounded-full bg-[#40bfae] flex-shrink-0" />
           <div className="flex-1 space-y-2">
             <div className="flex items-center gap-2">
-              <span className="text-white text-sm font-medium">Loop AI</span>
+              <span className="text-[#40bfae] text-sm font-medium">Loop AI</span>
               <span className="text-neutral-500 text-xs">just now</span>
             </div>
-            <div className="bg-neutral-800 rounded-2xl rounded-tl-md p-3 max-w-md">
+            <div className="bg-neutral-900 rounded-2xl rounded-tl-md p-3 max-w-md border border-[#40bfae]/20">
               <p className="text-neutral-100 text-sm">
                 The project follows a monorepo structure with separate frontend and
                 backend packages. The frontend is built with React and TypeScript,
@@ -76,10 +77,10 @@ function ChatUIDemo() {
 
       {/* Input */}
       <div className="p-4 border-t border-neutral-800">
-        <div className="bg-neutral-800 rounded-xl px-4 py-3 flex items-center gap-3">
+        <div className="bg-neutral-900 rounded-xl px-4 py-3 flex items-center gap-3 border border-[#40bfae]/20">
           <span className="text-neutral-500 text-sm">Message Loop AI...</span>
           <div className="flex-1" />
-          <Button size="sm" className="bg-blue-600 hover:bg-blue-700">
+          <Button size="sm" className="bg-[#40bfae] hover:bg-[#3ab19e] text-black">
             Send
           </Button>
         </div>
@@ -90,15 +91,15 @@ function ChatUIDemo() {
 
 export default function Landing() {
   return (
-    <div className="flex flex-col">
+    <div className="flex flex-col bg-black min-h-screen">
       {/* Hero Section */}
-      <BackgroundPaths title="Team AI Assistant" />
+      <BackgroundPaths title="Welcome to Loop AI" />
 
       {/* Scroll Animation Section */}
       <ContainerScroll
         titleComponent={
           <h2 className="text-4xl md:text-6xl font-bold text-center mb-4">
-            <span className="text-transparent bg-clip-text bg-gradient-to-r from-neutral-900 to-neutral-700 dark:from-white dark:to-neutral-400">
+            <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#40bfae] to-[#7dd3c0]">
               See Loop AI in Action
             </span>
           </h2>
@@ -107,13 +108,37 @@ export default function Landing() {
         <ChatUIDemo />
       </ContainerScroll>
 
+      {/* Lamp Section */}
+      <LampContainer>
+        <h2 className="text-4xl md:text-6xl font-bold text-center mb-4">
+          <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#40bfae] to-[#7dd3c0]">
+            AI-native team messaging platform.
+          </span>
+        </h2>
+      </LampContainer>
+
+      {/* Footer */}
+      <footer className="py-8 px-4 md:px-6 bg-black border-t border-[#40bfae]/20">
+        <div className="max-w-6xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 bg-[#40bfae] rounded-lg flex items-center justify-center">
+              <span className="text-sm font-bold text-black">◎</span>
+            </div>
+            <span className="font-semibold text-white">Loop AI</span>
+          </div>
+          <p className="text-sm text-neutral-500">
+            © 2024 Loop AI. All rights reserved.
+          </p>
+        </div>
+      </footer>
+
       {/* Sign in link */}
-      <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-20">
-        <p className="text-sm text-muted-foreground">
+      <div className="bg-black pb-8 pt-4 text-center">
+        <p className="text-sm text-neutral-400">
           Already have an account?{" "}
           <Link
             to="/login"
-            className="text-foreground underline underline-offset-2 hover:opacity-80"
+            className="text-[#40bfae] underline underline-offset-2 hover:opacity-80"
           >
             Sign in
           </Link>
