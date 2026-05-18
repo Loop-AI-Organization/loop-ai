@@ -9,6 +9,7 @@ import { TaskCard } from '@/components/task-card';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
@@ -313,48 +314,44 @@ export function InspectorPanel() {
           </TabsList>
 
           {/* Always-visible AI controls */}
-          <div className="border-b border-border px-3 py-2 space-y-2">
+          <div className="border-b border-border px-3 py-3 space-y-3">
             <div className="flex items-center justify-between gap-3">
-              <div className="min-w-0">
+              <div className="min-w-0 flex-1">
                 <Label className="text-xs flex items-center gap-1.5">
                   <BotOff className="w-3.5 h-3.5" />
-                  Restricted-LLM mode
+                  AI Participation
                 </Label>
                 <p className="text-2xs text-muted-foreground">
-                  {currentChannel?.isLlmRestricted
-                    ? 'Channel policy blocks AI replies.'
-                    : 'Channel policy allows AI when participation is on.'}
+                  Enable AI to participate in conversations
                 </p>
               </div>
               <Switch
-                data-testid="restricted-llm-switch"
-                checked={currentChannel?.isLlmRestricted ?? false}
-                disabled={!currentChannel || settingsSaving}
-                onCheckedChange={(checked) =>
-                  saveChannelSettings({
-                    isLlmRestricted: checked,
-                  })
-                }
-              />
-            </div>
-
-            <div className="flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <Label className="text-xs flex items-center gap-1.5">
-                  <Brain className="w-3.5 h-3.5" />
-                  AI participates
-                </Label>
-                <p className="text-2xs text-muted-foreground">Conversation setting used when policy allows AI.</p>
-              </div>
-              <Switch
-                data-testid="llm-participation-switch"
-                checked={currentChannel?.llmParticipationEnabled ?? true}
-                disabled={!currentChannel || settingsSaving || currentChannel?.isLlmRestricted === true}
+                checked={currentChannel?.llmParticipationEnabled ?? false}
                 onCheckedChange={(checked) =>
                   saveChannelSettings({
                     llmParticipationEnabled: checked,
                   })
                 }
+                disabled={!currentChannel || settingsSaving || currentChannel?.isLlmRestricted === true}
+              />
+            </div>
+
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <Label className="text-xs flex items-center gap-1.5">
+                  <Brain className="w-3.5 h-3.5" />
+                  Restricted Mode
+                </Label>
+                <p className="text-2xs text-muted-foreground">Limit AI model capabilities</p>
+              </div>
+              <Switch
+                checked={currentChannel?.isLlmRestricted ?? false}
+                onCheckedChange={(checked) =>
+                  saveChannelSettings({
+                    isLlmRestricted: checked,
+                  })
+                }
+                disabled={!currentChannel || settingsSaving}
               />
             </div>
 
