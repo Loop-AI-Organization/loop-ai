@@ -195,11 +195,22 @@ function WorkspaceContent({
     const [searchQuery, setSearchQuery] = React.useState('');
 
     const filteredWorkspaces = React.useMemo(() => {
-        if (!searchQuery) return workspaces;
-        return workspaces.filter((ws) =>
-            getWorkspaceName(ws).toLowerCase().includes(searchQuery.toLowerCase()),
-        );
-    }, [workspaces, searchQuery, getWorkspaceName]);
+        let result = workspaces;
+
+        // Filter out the currently selected workspace from the dropdown list
+        if (selectedWorkspace) {
+            result = result.filter(
+                (ws) => getWorkspaceId(ws) !== getWorkspaceId(selectedWorkspace),
+            );
+        }
+
+        if (searchQuery) {
+            result = result.filter((ws) =>
+                getWorkspaceName(ws).toLowerCase().includes(searchQuery.toLowerCase()),
+            );
+        }
+        return result;
+    }, [workspaces, searchQuery, selectedWorkspace, getWorkspaceName, getWorkspaceId]);
 
     React.useEffect(() => {
         onSearch?.(searchQuery);
@@ -215,19 +226,22 @@ function WorkspaceContent({
                     src={(workspace as any).logo}
                     alt={getWorkspaceName(workspace)}
                 />
-                <AvatarFallback className="text-xs">
+                <AvatarFallback className="text-xs bg-[#40bfae]/20 text-[#40bfae]">
                     {getWorkspaceName(workspace).charAt(0).toUpperCase()}
                 </AvatarFallback>
             </Avatar>
             <div className="flex min-w-0 flex-1 flex-col items-start">
-                <span className="truncate text-sm">{getWorkspaceName(workspace)}</span>
+                <span className={cn(
+                    'truncate text-sm',
+                    isSelected ? 'text-[#40bfae] font-medium' : '',
+                )}>{getWorkspaceName(workspace)}</span>
                 {(workspace as any).plan && (
                     <span className="text-muted-foreground text-xs">
                         {(workspace as any).plan}
                     </span>
                 )}
             </div>
-            {isSelected && <CheckIcon className="ml-auto h-4 w-4" />}
+            {isSelected && <CheckIcon className="ml-auto h-4 w-4 text-[#40bfae]" />}
         </div>
     );
 
@@ -271,9 +285,9 @@ function WorkspaceContent({
                                     onClick={() => onWorkspaceSelect(workspace)}
                                     className={cn(
                                         'flex w-full items-center gap-2 rounded-sm px-2 py-2 text-left text-sm',
-                                        'hover:bg-accent hover:text-accent-foreground',
-                                        'focus:outline-none',
-                                        isSelected && 'bg-accent text-accent-foreground',
+                                        'hover:bg-[#40bfae]/10 hover:text-[#40bfae]',
+                                        'focus:outline-none focus:bg-[#40bfae]/10',
+                                        isSelected && 'bg-[#40bfae]/15 text-[#40bfae]',
                                     )}
                                 >
                                     {renderWorkspace
