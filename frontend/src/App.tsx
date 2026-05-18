@@ -15,6 +15,7 @@ import WorkspaceChannel from "./pages/WorkspaceChannel";
 import WorkspaceSettings from "./pages/WorkspaceSettings";
 import AccountSettings from "./pages/AccountSettings";
 import NotFound from "./pages/NotFound";
+import Landing from "./pages/Landing";
 
 const queryClient = new QueryClient();
 
@@ -30,8 +31,11 @@ const App = () => {
       <Sonner />
       <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
         <Routes>
+          {/* Landing page */}
+          <Route path="/" element={<Landing />} />
+
           {/* Redirect root to app */}
-          <Route path="/" element={<Navigate to="/app" replace />} />
+          <Route path="/app" element={<Navigate to="/app" replace />} />
 
           {/* Auth */}
           <Route path="/login" element={<PublicOnlyRoute><Login /></PublicOnlyRoute>} />
