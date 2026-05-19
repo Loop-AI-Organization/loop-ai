@@ -7,7 +7,8 @@ import { PromptInputBox } from "@/components/ui/ai-prompt-box";
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useAppStore } from "@/store/app-store";
 import { streamAssistant } from "@/lib/api-client";
-import { Search, User, FolderOpen, MessageSquare, ArrowRight, Loader2, X } from "lucide-react";
+import { supabase } from "@/lib/supabase";
+import { Search, User, FolderOpen, MessageSquare, ArrowRight, Loader2, X, Check } from "lucide-react";
 import type { Message } from "@/types";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -191,6 +192,8 @@ export default function PromptPage() {
   };
 
   const [settingsName, setSettingsName] = useState(user?.name || "");
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
 
   // Debounced auto-save for settings name
   useEffect(() => {
@@ -202,8 +205,27 @@ export default function PromptPage() {
     return () => clearTimeout(timer);
   }, [settingsName, user?.name, updateUserName]);
 
-  const handleSaveAndClose = useCallback(() => {
+  const handleSaveAndClose = useCallback(async () => {
+    if (!settingsName.trim()) return;
+    setIsSaving(true);
+    setSaveSuccess(false);
+
+    // Update local store
     updateUserName(settingsName);
+
+    // Update Supabase user metadata
+    if (supabase) {
+      const { error } = await supabase.auth.updateUser({
+        data: { name: settingsName },
+      });
+      if (error) {
+        console.error("Failed to update user metadata:", error);
+      }
+    }
+
+    setIsSaving(false);
+    setSaveSuccess(true);
+    setTimeout(() => setSaveSuccess(false), 2000);
   }, [settingsName, updateUserName]);
 
   const handleClearConversation = () => {
@@ -258,9 +280,22 @@ export default function PromptPage() {
                   </div>
                   <button
                     onClick={handleSaveAndClose}
-                    className="w-full px-4 py-2 rounded-lg bg-[#40bfae] text-black hover:bg-[#3daf9e] transition-all duration-300 text-sm font-medium"
+                    disabled={isSaving}
+                    className="w-full px-4 py-2 rounded-lg bg-[#40bfae] text-black hover:bg-[#3daf9e] transition-all duration-300 text-sm font-medium disabled:opacity-50 flex items-center justify-center gap-2"
                   >
-                    Save
+                    {isSaving ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Saving...
+                      </>
+                    ) : saveSuccess ? (
+                      <>
+                        <Check className="w-4 h-4" />
+                        <span>Saved!</span>
+                      </>
+                    ) : (
+                      "Save"
+                    )}
                   </button>
                 </div>
               </DialogContent>

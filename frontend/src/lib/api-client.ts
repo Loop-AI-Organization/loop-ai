@@ -109,13 +109,18 @@ export interface StreamCallbacks {
 
 export async function streamAssistant(
   threadId: string,
-  _userMessage: string,
+  userMessage: string,
   callbacks: StreamCallbacks
 ): Promise<void> {
   const wsUrl =
     (import.meta.env.VITE_BACKEND_WS_URL as string | undefined) ||
     'wss://api.loopai-project.me/ws';
   const messagesPayload = buildThreadMessages(threadId);
+
+  // Append current user message to the messages array
+  if (userMessage.trim()) {
+    messagesPayload.push({ role: 'user' as const, content: userMessage });
+  }
 
   let fullContent = '';
 
