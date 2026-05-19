@@ -100,6 +100,79 @@ export async function sendMessage(threadId: string, content: string): Promise<Ap
   return { data: newMessage, success: true };
 }
 
+// Tool definitions for LLM-powered workspace navigation
+export interface ToolDefinition {
+  name: string;
+  description: string;
+  parameters: Record<string, {
+    type: string;
+    description: string;
+    required?: boolean;
+  }>;
+}
+
+export const NAVIGATION_TOOLS: ToolDefinition[] = [
+  {
+    name: "navigate_workspace",
+    description: "Navigate to a workspace. Use when user says 'go to workspace X', 'take me to X workspace', 'open workspace X'.",
+    parameters: {
+      workspace_name: {
+        type: "string",
+        description: "The name of the workspace to navigate to (or partial name for fuzzy matching).",
+        required: true,
+      },
+    },
+  },
+  {
+    name: "navigate_channel",
+    description: "Navigate to a channel within a workspace. Use when user says 'open channel X', 'go to channel X', 'switch to X channel'.",
+    parameters: {
+      channel_name: {
+        type: "string",
+        description: "The name of the channel to navigate to (or partial name for fuzzy matching).",
+        required: true,
+      },
+      workspace_name: {
+        type: "string",
+        description: "Optional: the workspace to search in. If not provided, searches all workspaces.",
+        required: false,
+      },
+    },
+  },
+  {
+    name: "navigate_dm",
+    description: "Navigate to a direct message conversation with a specific user. Use when user says 'message X', 'DM X', 'chat with X', 'open DM with X'.",
+    parameters: {
+      user_name: {
+        type: "string",
+        description: "The name or partial name of the user to message.",
+        required: true,
+      },
+      workspace_name: {
+        type: "string",
+        description: "Optional: the workspace to search in. If not provided, uses the current workspace.",
+        required: false,
+      },
+    },
+  },
+  {
+    name: "search_content",
+    description: "Search through workspaces, channels, files, and messages. Use when user says 'search for X', 'find X', 'look up X'.",
+    parameters: {
+      query: {
+        type: "string",
+        description: "The search query string.",
+        required: true,
+      },
+      search_type: {
+        type: "string",
+        description: "Optional: what to search ('all', 'workspaces', 'channels', 'files', 'messages'). Defaults to 'all'.",
+        required: false,
+      },
+    },
+  },
+];
+
 // Streaming assistant response simulation
 export interface StreamCallbacks {
   onToken: (token: string) => void;
@@ -107,10 +180,15 @@ export interface StreamCallbacks {
   onActionUpdate: (action: Action) => void;
 }
 
+export interface StreamAssistantOptions extends Partial<StreamCallbacks> {
+  tools?: ToolDefinition[];
+}
+
 export async function streamAssistant(
   threadId: string,
   userMessage: string,
-  callbacks: StreamCallbacks
+  callbacks: StreamCallbacks,
+  options?: StreamAssistantOptions
 ): Promise<void> {
   const wsUrl =
     (import.meta.env.VITE_BACKEND_WS_URL as string | undefined) ||
@@ -122,12 +200,22 @@ export async function streamAssistant(
     messagesPayload.push({ role: 'user' as const, content: userMessage });
   }
 
+  // Include tools in payload if provided
+  const payloadTools = options?.tools
+    ? NAVIGATION_TOOLS.filter(t => options.tools!.some(ut => ut.name === t.name))
+    : [];
+
   let fullContent = '';
 
   try {
     await streamOverWs({
       wsUrl,
-      payload: { type: 'user_message', threadId, messages: messagesPayload },
+      payload: {
+        type: 'user_message',
+        threadId,
+        messages: messagesPayload,
+        tools: payloadTools.length > 0 ? payloadTools : undefined,
+      },
       onEvent: (event) => {
         if (event.type === 'token' && typeof event.delta === 'string') {
           fullContent += event.delta;
