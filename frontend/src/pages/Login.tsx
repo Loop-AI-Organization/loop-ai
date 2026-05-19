@@ -43,79 +43,79 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden bg-background">
-      {/* Animated background – floating blurred blobs */}
+    <div className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden bg-[#0A0A0A]">
+      {/* Animated gradient background */}
       <div className="absolute inset-0 pointer-events-none" aria-hidden>
-        <div
-          className="login-bg-blob absolute rounded-full opacity-20"
-          style={{
-            width: 'min(80vmax, 480px)',
-            height: 'min(80vmax, 480px)',
-            left: '10%',
-            top: '20%',
-            background: 'hsl(var(--primary))',
-            filter: 'blur(80px)',
-            animation: 'loginBgFloat 22s ease-in-out infinite alternate',
-          }}
-        />
-        <div
-          className="login-bg-blob absolute rounded-full opacity-[0.15]"
-          style={{
-            width: 'min(70vmax, 400px)',
-            height: 'min(70vmax, 400px)',
-            right: '5%',
-            bottom: '15%',
-            background: 'hsl(var(--primary))',
-            filter: 'blur(70px)',
-            animation: 'loginBgFloat 25s ease-in-out infinite alternate-reverse',
-            animationDelay: '-5s',
-          }}
-        />
         <div
           className="login-bg-blob absolute rounded-full opacity-[0.12]"
           style={{
-            width: 'min(60vmax, 360px)',
-            height: 'min(60vmax, 360px)',
+            width: 'min(80vmax, 600px)',
+            height: 'min(80vmax, 600px)',
+            left: '5%',
+            top: '10%',
+            background: '#40bfae',
+            filter: 'blur(100px)',
+            animation: 'loginBgFloat 25s ease-in-out infinite alternate',
+          }}
+        />
+        <div
+          className="login-bg-blob absolute rounded-full opacity-[0.08]"
+          style={{
+            width: 'min(70vmax, 500px)',
+            height: 'min(70vmax, 500px)',
+            right: '5%',
+            bottom: '10%',
+            background: '#40bfae',
+            filter: 'blur(90px)',
+            animation: 'loginBgFloat 30s ease-in-out infinite alternate-reverse',
+            animationDelay: '-8s',
+          }}
+        />
+        <div
+          className="login-bg-blob absolute rounded-full opacity-[0.06]"
+          style={{
+            width: 'min(60vmax, 400px)',
+            height: 'min(60vmax, 400px)',
             left: '50%',
             top: '50%',
-            marginLeft: 'min(-30vmax, -180px)',
-            marginTop: 'min(-30vmax, -180px)',
-            background: 'hsl(var(--muted-foreground))',
-            filter: 'blur(90px)',
-            animation: 'loginBgFloat 20s ease-in-out infinite alternate',
-            animationDelay: '-10s',
+            marginLeft: 'min(-30vmax, -200px)',
+            marginTop: 'min(-30vmax, -200px)',
+            background: '#3dc4b0',
+            filter: 'blur(120px)',
+            animation: 'loginBgFloat 22s ease-in-out infinite alternate',
+            animationDelay: '-12s',
           }}
         />
       </div>
 
       {/* Login card */}
-      <div className="relative w-full max-w-md rounded-xl shadow-lg bg-card border border-border p-8">
+      <div className="relative w-full max-w-md rounded-2xl shadow-2xl bg-[#111111] border border-[#1e1e1e] p-8">
         <div className="space-y-6">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center shrink-0">
-              <span className="text-lg font-bold text-primary-foreground">◎</span>
+            <div className="w-10 h-10 rounded-xl bg-[#40bfae] flex items-center justify-center shrink-0">
+              <span className="text-lg font-bold text-[#0A0A0A]">◎</span>
             </div>
-            <span className="text-xl font-semibold text-foreground">Loop AI</span>
+            <span className="text-xl font-semibold text-white">Loop AI</span>
           </div>
 
           <div>
-            <h1 className="text-2xl font-semibold text-foreground">Log in to Loop AI</h1>
-            <p className="text-sm text-muted-foreground mt-1">
+            <h1 className="text-2xl font-semibold text-white">Log in to Loop AI</h1>
+            <p className="text-sm text-[#888] mt-1">
               Welcome back — sign in with your account
             </p>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
             {error && (
-              <p className="text-sm text-destructive text-center">{error}</p>
+              <p className="text-sm text-red-400 text-center">{error}</p>
             )}
 
             <div className="space-y-2">
-              <label htmlFor="email" className="text-sm font-medium text-foreground sr-only">
+              <label htmlFor="email" className="text-sm font-medium text-white sr-only">
                 Email
               </label>
               <div className="relative">
-                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#666] pointer-events-none" />
                 <Input
                   id="email"
                   type="email"
@@ -124,17 +124,17 @@ export default function Login() {
                   onChange={(e) => setEmail(e.target.value)}
                   required
                   autoComplete="email"
-                  className="pl-10"
+                  className="pl-10 bg-[#1a1a1a] border-[#2a2a2a] text-white placeholder:text-[#555] focus:border-[#40bfae] focus:ring-[#40bfae]/20"
                 />
               </div>
             </div>
 
             <div className="space-y-2">
-              <label htmlFor="password" className="text-sm font-medium text-foreground sr-only">
+              <label htmlFor="password" className="text-sm font-medium text-white sr-only">
                 Password
               </label>
               <div className="relative">
-                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#666] pointer-events-none" />
                 <Input
                   id="password"
                   type="password"
@@ -143,7 +143,7 @@ export default function Login() {
                   onChange={(e) => setPassword(e.target.value)}
                   required
                   autoComplete="current-password"
-                  className="pl-10"
+                  className="pl-10 bg-[#1a1a1a] border-[#2a2a2a] text-white placeholder:text-[#555] focus:border-[#40bfae] focus:ring-[#40bfae]/20"
                 />
               </div>
             </div>
@@ -153,12 +153,13 @@ export default function Login() {
                 <Checkbox
                   checked={rememberMe}
                   onCheckedChange={(checked) => setRememberMe(checked === true)}
+                  className="border-[#2a2a2a] data-[state=checked]:bg-[#40bfae] data-[state=checked]:border-[#40bfae]"
                 />
-                <span className="text-sm text-muted-foreground">Remember me</span>
+                <span className="text-sm text-[#888]">Remember me</span>
               </label>
               <Link
                 to="/forgot-password"
-                className="text-sm text-primary underline underline-offset-2 hover:opacity-80"
+                className="text-sm text-[#40bfae] hover:opacity-80 transition-opacity"
               >
                 Forgot password?
               </Link>
@@ -166,16 +167,16 @@ export default function Login() {
 
             <Button
               type="submit"
-              className="w-full"
+              className="w-full bg-[#40bfae] hover:bg-[#3ab3a0] text-[#0A0A0A] font-semibold disabled:opacity-50"
               disabled={isLoading}
             >
               {isLoading ? 'Signing in...' : 'Sign In'}
             </Button>
           </form>
 
-          <p className="text-center text-sm text-muted-foreground">
+          <p className="text-center text-sm text-[#888]">
             Don&apos;t have an account?{' '}
-            <Link to="/signup" className="text-primary underline underline-offset-2">
+            <Link to="/signup" className="text-[#40bfae] hover:opacity-80 transition-opacity">
               Create an account
             </Link>
           </p>
