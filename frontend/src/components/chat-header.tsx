@@ -1,11 +1,12 @@
 import { Search, PanelRightClose, PanelRightOpen, Menu, ChevronRight, MessageSquare } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useAppStore } from '@/store/app-store';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 
 export function ChatHeader() {
   const navigate = useNavigate();
+  const location = useLocation();
   const {
     workspaces,
     channels,
@@ -19,6 +20,9 @@ export function ChatHeader() {
 
   const currentWorkspace = workspaces.find((w) => w.id === currentWorkspaceId);
   const currentChannel = channels.find((c) => c.id === currentChannelId);
+
+  // Hide "Back to AI Chat" button when already at /app route
+  const isAtAppRoute = location.pathname === '/app';
 
   return (
     <header className="h-14 border-b border-border flex items-center justify-between px-4 bg-card flex-shrink-0">
@@ -40,16 +44,18 @@ export function ChatHeader() {
           <span className="text-muted-foreground">{currentChannel?.name}</span>
         </nav>
 
-        {/* Back to AI Chat */}
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => navigate('/app')}
-          className="text-[#40bfae] hover:text-[#40bfae] hover:bg-[#40bfae]/10 gap-1.5"
-        >
-          <MessageSquare className="w-4 h-4" />
-          <span className="hidden sm:inline">Back to AI Chat</span>
-        </Button>
+        {/* Back to AI Chat - hidden when at /app route */}
+        {!isAtAppRoute && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => navigate('/app')}
+            className="text-[#40bfae] hover:text-[#40bfae] hover:bg-[#40bfae]/10 gap-1.5"
+          >
+            <MessageSquare className="w-4 h-4" />
+            <span className="hidden sm:inline">Back to AI Chat</span>
+          </Button>
+        )}
       </div>
 
       {/* Right: Actions */}

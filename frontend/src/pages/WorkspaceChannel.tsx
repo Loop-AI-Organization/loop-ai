@@ -33,7 +33,15 @@ export default function WorkspaceChannel() {
     // Validate that the workspace exists in the user's list.
     const workspace = state.workspaces.find((w) => w.id === workspaceId);
     if (!workspace) {
-      // Unknown workspace — fall back to the first known workspace/channel.
+      // Unknown workspace — if data is still loading, wait for it
+      // Do NOT navigate away while data is loading; just return and let the
+      // loading state render. Once data loads, this effect will re-run with
+      // populated state.
+      if (dataLoading || state.workspaces.length === 0) {
+        return;
+      }
+      // Workspaces are loaded but the requested one isn't in the list — this
+      // shouldn't happen in normal usage, but handle gracefully by falling back.
       const fallbackWs = state.workspaces[0];
       if (fallbackWs) {
         const fallbackChs = state.channels.filter(
@@ -45,6 +53,7 @@ export default function WorkspaceChannel() {
           return;
         }
       }
+      // No fallback possible — stay at /app
       navigate('/app', { replace: true });
       return;
     }

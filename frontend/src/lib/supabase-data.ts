@@ -1238,3 +1238,79 @@ export function matchMemberByName(
 
   return bestScore >= 50 ? best : null;
 }
+
+/** Search for people across workspaces by name, email, or job title via Supabase.
+ *  Returns all matches across all workspaces the user belongs to.
+ */
+export async function searchPeople(query: string, workspaceId?: string): Promise<WorkspaceMember[]> {
+  const supabase = getSupabase();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return [];
+  if (!query.trim()) return [];
+
+  const q = query.trim().toLowerCase();
+
+  // Get all workspaces user belongs to
+  const ownedWorkspaces = await supabase
+    .from('workspaces')
+    .select('id')
+    .or(`user_id.eq.${user.id},owner_id.eq.${user.id}`);
+
+  const memberWorkspaces = await supabase
+    .from('workspace_members')
+    .select('workspace_id')
+    .eq('user_id', user.id);
+
+  const allWorkspaceIds = [
+    ...new Set([
+      ...(ownedWorkspaces.data ?? []).map((r: { id: string }) => r.id),
+      ...(memberWorkspaces.data ?? []).map((r: { workspace_id: string }) => r.workspace_id),
+    ]),
+  ];
+
+  const targetWorkspaceIds = workspaceId
+    ? allWorkspaceIds.filter((id: string) => id === workspaceId)
+    : allWorkspaceIds;
+
+  if (targetWorkspaceIds.length === 0) return [];
+
+  // Fetch workspace members for target workspaces
+  const { data: memberRows, error } = await supabase
+    .from('workspace_members')
+    .select('id, workspace_id, user_id, role')
+    .in('workspace_id', targetWorkspaceIds);
+
+  if (error || !memberRows) return [];
+
+  const memberUserIds = [...new Set((memberRows ?? []).map((r: { user_id: string }) => r.user_id))];
+  if (memberUserIds.length === 0) return [];
+
+  // Fetch profile data (first_name, email) from profiles table
+  const { data: profileRows } = await supabase
+    .from('profiles')
+    .select('id, first_name, email')
+    .in('id', memberUserIds);
+
+  const profileMap = new Map((profileRows ?? []).map((p: { id: string; first_name: string | null; email: string | null }) => [p.id, p]));
+
+  // Filter by query match on name, email
+  const matches: WorkspaceMember[] = [];
+  for (const member of (memberRows ?? [])) {
+    const profile = profileMap.get(member.user_id);
+    const name = profile?.first_name ?? '';
+    const email = profile?.email ?? '';
+    const searchText = `${name} ${email}`.toLowerCase();
+
+    if (searchText.includes(q) || q.split(/\s+/).every((word: string) => searchText.includes(word))) {
+      matches.push({
+        id: member.id,
+        userId: member.user_id,
+        role: member.role as 'owner' | 'member',
+        email,
+        displayName: name,
+      });
+    }
+  }
+
+  return matches;
+}

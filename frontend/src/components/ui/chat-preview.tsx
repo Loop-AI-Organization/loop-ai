@@ -1,89 +1,148 @@
-import React from "react";
+"use client";
 
-interface Message {
+import React from "react";
+import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
+import { cn } from "@/lib/utils";
+
+export interface ChatPreviewMessage {
   id: string;
   role: "user" | "assistant";
   content: string;
+  senderName?: string;
+  senderAvatar?: string;
   timestamp?: Date;
 }
 
-interface ChatPreviewProps {
-  messages?: Message[];
+export interface ChatPreviewProps {
+  messages?: ChatPreviewMessage[];
+  workspaceName?: string;
+  channelName?: string;
   className?: string;
 }
 
-const defaultMessages: Message[] = [
-  { id: "1", role: "assistant", content: "Hello! How can I help you today?" },
-  { id: "2", role: "user", content: "I need help with my account settings." },
-  {
-    id: "3",
-    role: "assistant",
-    content: "Sure, I can assist with that. What would you like to change?",
-  },
-];
+function formatTime(date: Date): string {
+  return date.toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  });
+}
+
+function truncateMessage(content: string, maxLength: number = 80): string {
+  if (content.length <= maxLength) return content;
+  return content.slice(0, maxLength).trim() + "...";
+}
+
+function getInitials(name?: string): string {
+  if (!name) return "?";
+  const parts = name.trim().split(/\s+/);
+  if (parts.length >= 2) {
+    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+  }
+  return name.slice(0, 2).toUpperCase();
+}
 
 export const ChatPreview: React.FC<ChatPreviewProps> = ({
-  messages = defaultMessages,
+  messages = [],
+  workspaceName,
+  channelName,
   className = "",
 }) => {
+  const hasContext = workspaceName || channelName;
+
   return (
     <div
-      className={`flex flex-col h-full bg-card border border-border rounded-lg overflow-hidden ${className}`}
-      style={{ maxWidth: "320px" }}
+      className={cn(
+        "flex flex-col rounded-lg overflow-hidden border border-neutral-800",
+        className
+      )}
+      style={{ backgroundColor: "#0A0A0A", maxWidth: "320px" }}
     >
       {/* Header */}
       <div
-        className="flex items-center gap-2 px-3 py-2 border-b border-border"
-        style={{ backgroundColor: "hsl(var(--surface-sunken))" }}
+        className="flex items-center gap-2 px-3 py-2 border-b border-neutral-800"
+        style={{ backgroundColor: "#111111" }}
       >
-        <div
-          className="w-2 h-2 rounded-full"
-          style={{ backgroundColor: "#40bfae" }}
-        />
-        <span className="text-xs font-medium text-secondary">Loop AI</span>
+        {hasContext && (
+          <span className="text-xs text-neutral-500">
+            {channelName && <span className="text-[#40bfae]"># {channelName}</span>}
+            {workspaceName && <span> in {workspaceName}</span>}
+          </span>
+        )}
+        {!hasContext && (
+          <>
+            <div
+              className="w-2 h-2 rounded-full"
+              style={{ backgroundColor: "#40bfae" }}
+            />
+            <span className="text-xs font-medium text-neutral-400">Loop AI</span>
+          </>
+        )}
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-3 space-y-2">
-        {messages.map((message, index) => (
-          <div
-            key={message.id}
-            className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
-            style={{
-              animation: "message-appear 0.3s ease-out forwards",
-              animationDelay: `${index * 0.1}s`,
-              opacity: 0,
-            }}
-          >
-            <div
-              className={`max-w-[80%] px-3 py-2 text-sm rounded-lg ${
-                message.role === "user"
-                  ? "text-white rounded-br-sm"
-                  : "bg-muted text-foreground rounded-bl-sm"
-              }`}
-              style={
-                message.role === "user"
-                  ? { backgroundColor: "#40bfae" }
-                  : undefined
-              }
-            >
-              {message.content}
-            </div>
+      <div className="flex-1 overflow-y-auto p-3 space-y-3">
+        {messages.length === 0 ? (
+          <div className="text-xs text-neutral-500 text-center py-4">
+            No messages
           </div>
-        ))}
-      </div>
+        ) : (
+          messages.map((message) => (
+            <div
+              key={message.id}
+              className="flex items-start gap-2"
+            >
+              {/* Avatar */}
+              <Avatar className="h-7 w-7 shrink-0">
+                {message.senderAvatar ? (
+                  <AvatarImage src={message.senderAvatar} />
+                ) : (
+                  <AvatarFallback
+                    className={cn(
+                      "text-xs",
+                      message.role === "user"
+                        ? "bg-[#40bfae]/20 text-[#40bfae]"
+                        : "bg-neutral-800 text-neutral-400"
+                    )}
+                  >
+                    {getInitials(message.senderName)}
+                  </AvatarFallback>
+                )}
+              </Avatar>
 
-      {/* Input hint */}
-      <div
-        className="px-3 py-2 border-t border-border"
-        style={{ backgroundColor: "hsl(var(--surface-sunken))" }}
-      >
-        <div
-          className="text-xs text-muted-foreground px-3 py-2 rounded-md border border-border"
-          style={{ backgroundColor: "hsl(var(--muted))" }}
-        >
-          Type a message...
-        </div>
+              {/* Content */}
+              <div className="flex-1 min-w-0">
+                <div className="flex items-baseline gap-2">
+                  <span
+                    className={cn(
+                      "text-xs font-medium",
+                      message.role === "user"
+                        ? "text-[#40bfae]"
+                        : "text-neutral-400"
+                    )}
+                  >
+                    {message.senderName || (message.role === "user" ? "You" : "Loop AI")}
+                  </span>
+                  {message.timestamp && (
+                    <span className="text-[10px] text-neutral-600">
+                      {formatTime(message.timestamp)}
+                    </span>
+                  )}
+                </div>
+                <p
+                  className={cn(
+                    "text-sm leading-relaxed break-words",
+                    message.role === "user"
+                      ? "text-neutral-200"
+                      : "text-neutral-300"
+                  )}
+                >
+                  {truncateMessage(message.content)}
+                </p>
+              </div>
+            </div>
+          ))
+        )}
       </div>
     </div>
   );
