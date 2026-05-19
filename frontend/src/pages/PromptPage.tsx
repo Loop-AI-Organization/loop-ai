@@ -1,14 +1,14 @@
 "use client";
 
 import { motion, AnimatePresence } from "framer-motion";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link, useLocation } from "react-router-dom";
 import AnimatedGradientBackground from "@/components/ui/animated-gradient-background";
 import { PromptInputBox } from "@/components/ui/ai-prompt-box";
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useAppStore } from "@/store/app-store";
 import { streamAssistant } from "@/lib/api-client";
 import { supabase } from "@/lib/supabase";
-import { Search, User, FolderOpen, MessageSquare, ArrowRight, Loader2, X, Check } from "lucide-react";
+import { Search, User, FolderOpen, MessageSquare, ArrowRight, Loader2, X, Check, Home, ChevronRight, MessageCircle } from "lucide-react";
 import type { Message } from "@/types";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -20,6 +20,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Settings } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 interface ChatMessage {
   id: string;
@@ -503,6 +504,11 @@ export default function PromptPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+
+  // Check if we're NOT in a workspace (on main PromptPage at /app, not /app/:workspaceId)
+  const location = useLocation();
+  const isInWorkspace = Boolean(location.pathname.match(/^\/app\/[^/]+$/)?.[0]);
 
   // Debounced auto-save for settings name
   useEffect(() => {
@@ -543,11 +549,93 @@ export default function PromptPage() {
     setShowWelcome(true);
   };
 
+  // SessionNavBar component
+  const SessionNavBar = () => (
+    <div
+      className={cn(
+        "fixed left-0 top-0 h-full z-40 flex flex-col bg-black/80 backdrop-blur-xl border-r border-neutral-800 transition-all duration-300 ease-in-out",
+        "hover:w-64 w-16 group",
+        sidebarCollapsed ? "w-16" : "w-64"
+      )}
+      onMouseEnter={() => setSidebarCollapsed(false)}
+      onMouseLeave={() => setSidebarCollapsed(true)}
+    >
+      {/* Logo/Brand */}
+      <div className="flex items-center gap-3 px-4 py-5 border-b border-neutral-800">
+        <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[#40bfae] to-[#2d9a8a] flex items-center justify-center shrink-0">
+          <span className="text-black font-bold text-sm">L</span>
+        </div>
+        <span className={cn("text-neutral-100 font-semibold text-lg whitespace-nowrap transition-opacity duration-200", sidebarCollapsed ? "opacity-0" : "opacity-100")}>
+          Loop AI
+        </span>
+      </div>
+
+      {/* Navigation */}
+      <div className="flex-1 overflow-y-auto py-4">
+        {/* Back to AI Chat */}
+        <Link
+          to="/app"
+          className={cn(
+            "flex items-center gap-3 px-4 py-2.5 mx-2 rounded-lg text-neutral-400 hover:text-[#40bfae] hover:bg-neutral-800/50 transition-all duration-200",
+            sidebarCollapsed ? "justify-center" : ""
+          )}
+        >
+          <MessageCircle className="w-5 h-5 shrink-0" />
+          <span className={cn("whitespace-nowrap transition-opacity duration-200", sidebarCollapsed ? "opacity-0 w-0" : "opacity-100")}>
+            Back to AI Chat
+          </span>
+        </Link>
+
+        {/* Workspaces Section */}
+        <div className="mt-6 px-4">
+          <div className={cn("flex items-center gap-2 mb-2 transition-opacity duration-200", sidebarCollapsed ? "opacity-0" : "opacity-100")}>
+            <span className="text-xs font-medium text-neutral-500 uppercase tracking-wider">Workspaces</span>
+          </div>
+          <div className="space-y-1">
+            {workspaces.map((workspace) => (
+              <Link
+                key={workspace.id}
+                to={`/app/${workspace.id}`}
+                className={cn(
+                  "flex items-center gap-3 px-3 py-2 rounded-lg text-neutral-400 hover:text-[#40bfae] hover:bg-neutral-800/50 transition-all duration-200",
+                  sidebarCollapsed ? "justify-center" : ""
+                )}
+              >
+                <span className="w-5 h-5 rounded-md bg-[#40bfae]/20 flex items-center justify-center shrink-0 text-[#40bfae] text-xs font-medium">
+                  {workspace.icon || workspace.name.charAt(0).toUpperCase()}
+                </span>
+                <span className={cn("whitespace-nowrap transition-opacity duration-200 truncate", sidebarCollapsed ? "opacity-0 w-0" : "opacity-100")}>
+                  {workspace.name}
+                </span>
+              </Link>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Footer */}
+      <div className="border-t border-neutral-800 p-4">
+        <div className={cn("flex items-center gap-3 transition-opacity duration-200", sidebarCollapsed ? "opacity-0" : "opacity-100")}>
+          <div className="w-8 h-8 rounded-full bg-[#40bfae]/20 flex items-center justify-center">
+            <span className="text-[#40bfae] text-sm font-medium">{user?.name?.charAt(0).toUpperCase() || 'U'}</span>
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm text-neutral-200 truncate">{user?.name || 'User'}</p>
+            <p className="text-xs text-neutral-500 truncate">{user?.email || ''}</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
   return (
     <div className="relative min-h-screen w-full bg-black overflow-hidden">
       <AnimatedGradientBackground />
 
-      <div className="relative z-10 flex flex-col min-h-screen">
+      {/* Session Sidebar - only show when NOT in a workspace */}
+      {!isInWorkspace && <SessionNavBar />}
+
+      <div className="relative z-10 flex flex-col min-h-screen transition-all duration-300">
         {/* Header */}
         <motion.header
           initial={{ opacity: 0, y: -20 }}

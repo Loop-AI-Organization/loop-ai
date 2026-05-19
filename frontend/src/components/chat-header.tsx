@@ -1,9 +1,11 @@
-import { Search, PanelRightClose, PanelRightOpen, Menu, ChevronRight } from 'lucide-react';
+import { Search, PanelRightClose, PanelRightOpen, Menu, ChevronRight, MessageSquare } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '@/store/app-store';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 
 export function ChatHeader() {
+  const navigate = useNavigate();
   const {
     workspaces,
     channels,
@@ -37,6 +39,17 @@ export function ChatHeader() {
           <ChevronRight className="w-3.5 h-3.5 text-muted-foreground" />
           <span className="text-muted-foreground">{currentChannel?.name}</span>
         </nav>
+
+        {/* Back to AI Chat */}
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => navigate('/app')}
+          className="text-[#40bfae] hover:text-[#40bfae] hover:bg-[#40bfae]/10 gap-1.5"
+        >
+          <MessageSquare className="w-4 h-4" />
+          <span className="hidden sm:inline">Back to AI Chat</span>
+        </Button>
       </div>
 
       {/* Right: Actions */}
