@@ -4,10 +4,10 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import AnimatedGradientBackground from "@/components/ui/animated-gradient-background";
 import { PromptInputBox } from "@/components/ui/ai-prompt-box";
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { useAppStore } from "@/store/app-store";
 import { streamAssistant } from "@/lib/api-client";
-import { Search, User, FolderOpen, MessageSquare, ArrowRight, Loader2 } from "lucide-react";
+import { Search, User, FolderOpen, MessageSquare, ArrowRight, Loader2, X } from "lucide-react";
 import type { Message } from "@/types";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -190,8 +190,25 @@ export default function PromptPage() {
     setIsLoading(false);
   };
 
-  const handleNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    updateUserName(e.target.value);
+  const [settingsName, setSettingsName] = useState(user?.name || "");
+
+  // Debounced auto-save for settings name
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (settingsName !== user?.name) {
+        updateUserName(settingsName);
+      }
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [settingsName, user?.name, updateUserName]);
+
+  const handleSaveAndClose = useCallback(() => {
+    updateUserName(settingsName);
+  }, [settingsName, updateUserName]);
+
+  const handleClearConversation = () => {
+    setMessages([]);
+    setShowWelcome(true);
   };
 
   return (
@@ -233,12 +250,18 @@ export default function PromptPage() {
                     <input
                       id="name"
                       type="text"
-                      defaultValue={user?.name || ""}
-                      onChange={handleNameChange}
+                      value={settingsName}
+                      onChange={(e) => setSettingsName(e.target.value)}
                       className="w-full px-3 py-2 rounded-lg bg-neutral-900 border border-neutral-700 text-neutral-200 placeholder-neutral-500 focus:outline-none focus:ring-2 focus:ring-[#40bfae] focus:border-transparent transition-all"
                       placeholder="Enter your name"
                     />
                   </div>
+                  <button
+                    onClick={handleSaveAndClose}
+                    className="w-full px-4 py-2 rounded-lg bg-[#40bfae] text-black hover:bg-[#3daf9e] transition-all duration-300 text-sm font-medium"
+                  >
+                    Save
+                  </button>
                 </div>
               </DialogContent>
             </Dialog>
@@ -350,6 +373,17 @@ export default function PromptPage() {
                   className="w-full"
                 />
               </div>
+              {messages.length > 0 && (
+                <div className="flex justify-center mt-2">
+                  <button
+                    onClick={handleClearConversation}
+                    className="flex items-center gap-1 px-3 py-1 text-neutral-500 hover:text-neutral-300 text-sm transition-colors"
+                  >
+                    <X className="w-4 h-4" />
+                    <span>Clear conversation</span>
+                  </button>
+                </div>
+              )}
             </motion.div>
           </div>
         </div>
