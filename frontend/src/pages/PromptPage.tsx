@@ -194,6 +194,7 @@ export default function PromptPage() {
   const [settingsName, setSettingsName] = useState(user?.name || "");
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   // Debounced auto-save for settings name
   useEffect(() => {
@@ -225,6 +226,7 @@ export default function PromptPage() {
 
     setIsSaving(false);
     setSaveSuccess(true);
+    setSettingsOpen(false);
     setTimeout(() => setSaveSuccess(false), 2000);
   }, [settingsName, updateUserName]);
 
@@ -253,9 +255,9 @@ export default function PromptPage() {
           </div>
 
           <div className="flex items-center gap-4">
-            <Dialog>
+            <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
               <DialogTrigger asChild>
-                <button className="h-9 px-4 py-2 rounded-lg bg-[#40bfae] text-black hover:bg-[#3daf9e] transition-all duration-300 text-sm font-medium flex items-center gap-2">
+                <button className="h-9 px-4 py-2 rounded-lg bg-neutral-800 border border-neutral-700 text-neutral-200 hover:bg-neutral-700 hover:border-neutral-600 transition-all duration-300 text-sm font-medium flex items-center gap-2">
                   <Settings className="h-4 w-4" />
                   <span>Settings</span>
                 </button>
@@ -304,8 +306,8 @@ export default function PromptPage() {
         </motion.header>
 
         {/* Main content */}
-        <div className="flex-1 flex flex-col items-center justify-center px-4 pb-24">
-          <div className="w-full max-w-3xl">
+        <div className="flex-1 flex flex-col items-center justify-end px-4 md:px-6 lg:px-8 pb-8 md:pb-12">
+          <div className="w-full max-w-2xl mx-auto flex flex-col min-h-0" style={{ maxHeight: "calc(100vh - 180px)" }}>
             {/* Welcome state */}
             <AnimatePresence>
               {showWelcome && messages.length === 0 && (
@@ -314,7 +316,7 @@ export default function PromptPage() {
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -20 }}
                   transition={{ duration: 0.6 }}
-                  className="text-center mb-12"
+                  className="text-center mb-8 mt-auto pt-8"
                 >
                   <h1 className="text-4xl md:text-5xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-[#40bfae] to-[#7dd3c0] mb-4">
                     What would you like to do?
@@ -344,7 +346,7 @@ export default function PromptPage() {
 
             {/* Chat messages */}
             {messages.length > 0 && (
-              <div className="space-y-6 mb-6 max-h-[50vh] overflow-y-auto">
+              <div className="space-y-6 mb-6 overflow-y-auto flex-1 min-h-0" style={{ maxHeight: "calc(100vh - 320px)" }}>
                 {messages.map((msg, index) => (
                   <motion.div
                     key={msg.id}
@@ -398,7 +400,7 @@ export default function PromptPage() {
               initial={{ opacity: 0, y: 30 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.6, delay: showWelcome ? 0.6 : 0 }}
-              className="sticky bottom-0"
+              className="mt-auto pt-4"
             >
               <div className="relative">
                 <PromptInputBox
