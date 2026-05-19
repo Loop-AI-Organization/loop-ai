@@ -36,6 +36,7 @@ interface AppState {
 
   // Actions
   setUser: (user: User | null) => void;
+  updateUserName: (name: string) => void;
   setDataLoading: (loading: boolean) => void;
   setDataError: (error: string | null) => void;
   setWorkspaces: (workspaces: Workspace[]) => void;
@@ -126,6 +127,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   setUser: (user) => set({ user }),
+  updateUserName: (name: string) =>
+    set((state) => ({
+      user: state.user ? { ...state.user, name } : null,
+    })),
   setDataLoading: (dataLoading) => set({ dataLoading }),
   setDataError: (dataError) => set({ dataError }),
   setWorkspaces: (workspaces) => set({ workspaces }),
