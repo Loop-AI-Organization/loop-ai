@@ -4,16 +4,25 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import AnimatedGradientBackground from "@/components/ui/animated-gradient-background";
 import { PromptInputBox } from "@/components/ui/ai-prompt-box";
-import { Workspaces, WorkspaceTrigger, WorkspaceContent } from "@/components/ui/workspaces";
+import { AnimatedDropdown } from "@/components/ui/animated-dropdown";
 import { useState, useRef, useEffect } from "react";
 import { useAppStore } from "@/store/app-store";
 import { streamAssistant, sendMessage } from "@/lib/api-client";
-import { Search, User, FolderOpen, MessageSquare, ArrowRight, Loader2, X, PlusIcon } from "lucide-react";
+import { Search, User, FolderOpen, MessageSquare, ArrowRight, Loader2, X } from "lucide-react";
 import type { Message } from "@/types";
 import type { Workspace } from "@/components/ui/workspaces";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { CheckIcon, ChevronDownIcon } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { Settings } from "lucide-react";
 
 interface ChatMessage {
   id: string;
@@ -276,32 +285,11 @@ export default function PromptPage() {
           <div className="flex items-center gap-4">
             {/* Workspace Switcher */}
             {workspaceList.length > 0 ? (
-              <Workspaces
+              <AnimatedDropdown
                 workspaces={workspaceList}
                 selectedWorkspaceId={currentWorkspaceId || workspaceList[0]?.id}
                 onWorkspaceChange={handleWorkspaceSelect}
-              >
-                <WorkspaceTrigger
-                  renderTrigger={(workspace) => (
-                    <div className="flex items-center gap-2">
-                      <span className="truncate">Workspace</span>
-                      <ChevronDownIcon className="h-4 w-4 shrink-0" />
-                    </div>
-                  )}
-                  className="rounded-lg shadow-sm shadow-black/5 h-9 px-4 py-2 min-w-48 bg-gradient-to-r from-[#40bfae]/15 via-[#40bfae]/10 to-[#7dd3c0]/15 border border-[#40bfae]/20 text-[#40bfae] hover:from-[#40bfae]/25 hover:via-[#40bfae]/20 hover:to-[#7dd3c0]/25 transition-all duration-300"
-                />
-                <WorkspaceContent searchable title="Switch Workspace">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="text-neutral-400 w-full justify-start hover:text-[#40bfae]"
-                    onClick={() => navigate("/app")}
-                  >
-                    <PlusIcon className="mr-2 h-4 w-4" />
-                    Create workspace
-                  </Button>
-                </WorkspaceContent>
-              </Workspaces>
+              />
             ) : (
               <button
                 onClick={() => navigate("/app")}
@@ -311,12 +299,74 @@ export default function PromptPage() {
               </button>
             )}
 
-            <button
-              onClick={() => navigate("/app/account")}
-              className="text-neutral-400 hover:text-neutral-100 text-sm transition-colors"
-            >
-              Settings
-            </button>
+            <Dialog>
+              <DialogTrigger asChild>
+                <button
+                  className="h-9 px-4 py-2 min-w-48 rounded-lg shadow-sm shadow-black/5 bg-gradient-to-r from-[#40bfae]/15 via-[#40bfae]/10 to-[#7dd3c0]/15 border border-[#40bfae]/20 text-[#40bfae] hover:from-[#40bfae]/25 hover:via-[#40bfae]/20 hover:to-[#7dd3c0]/25 transition-all duration-300 text-sm flex items-center gap-2"
+                >
+                  <Settings className="h-4 w-4" />
+                  <span>Settings</span>
+                </button>
+              </DialogTrigger>
+              <DialogContent className="sm:max-w-[425px]">
+                <DialogHeader>
+                  <DialogTitle>Settings</DialogTitle>
+                  <DialogDescription>
+                    Manage your account settings and preferences.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-4 py-4">
+                  <button
+                    onClick={() => navigate("/app/account")}
+                    className="w-full text-left px-4 py-3 rounded-lg hover:bg-neutral-800/50 transition-colors flex items-center gap-3 text-neutral-200"
+                  >
+                    <div className="w-8 h-8 rounded-full bg-[#40bfae]/20 flex items-center justify-center">
+                      <User className="h-4 w-4 text-[#40bfae]" />
+                    </div>
+                    <div>
+                      <div className="font-medium">Account</div>
+                      <div className="text-xs text-neutral-500">Manage your account settings</div>
+                    </div>
+                  </button>
+                  <button className="w-full text-left px-4 py-3 rounded-lg hover:bg-neutral-800/50 transition-colors flex items-center gap-3 text-neutral-200">
+                    <div className="w-8 h-8 rounded-full bg-[#40bfae]/20 flex items-center justify-center">
+                      <CheckIcon className="h-4 w-4 text-[#40bfae]" />
+                    </div>
+                    <div>
+                      <div className="font-medium">Notifications</div>
+                      <div className="text-xs text-neutral-500">Configure notification preferences</div>
+                    </div>
+                  </button>
+                  <button className="w-full text-left px-4 py-3 rounded-lg hover:bg-neutral-800/50 transition-colors flex items-center gap-3 text-neutral-200">
+                    <div className="w-8 h-8 rounded-full bg-[#40bfae]/20 flex items-center justify-center">
+                      <span className="text-[#40bfae] text-sm font-bold">T</span>
+                    </div>
+                    <div>
+                      <div className="font-medium">Theme</div>
+                      <div className="text-xs text-neutral-500">Switch between light and dark mode</div>
+                    </div>
+                  </button>
+                  <button className="w-full text-left px-4 py-3 rounded-lg hover:bg-neutral-800/50 transition-colors flex items-center gap-3 text-neutral-200">
+                    <div className="w-8 h-8 rounded-full bg-[#40bfae]/20 flex items-center justify-center">
+                      <span className="text-[#40bfae] text-sm font-bold">S</span>
+                    </div>
+                    <div>
+                      <div className="font-medium">Security</div>
+                      <div className="text-xs text-neutral-500">Password and authentication</div>
+                    </div>
+                  </button>
+                  <button className="w-full text-left px-4 py-3 rounded-lg hover:bg-neutral-800/50 transition-colors flex items-center gap-3 text-neutral-200">
+                    <div className="w-8 h-8 rounded-full bg-[#40bfae]/20 flex items-center justify-center">
+                      <span className="text-[#40bfae] text-sm font-bold">?</span>
+                    </div>
+                    <div>
+                      <div className="font-medium">Help & Support</div>
+                      <div className="text-xs text-neutral-500">Documentation and contact us</div>
+                    </div>
+                  </button>
+                </div>
+              </DialogContent>
+            </Dialog>
           </div>
         </motion.header>
 
