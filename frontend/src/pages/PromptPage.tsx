@@ -284,11 +284,11 @@ export default function PromptPage() {
                 <WorkspaceTrigger
                   renderTrigger={(workspace) => (
                     <div className="flex items-center gap-2">
-                      <span className="truncate">{workspace.name}</span>
+                      <span className="truncate">Workspace</span>
                       <ChevronDownIcon className="h-4 w-4 shrink-0" />
                     </div>
                   )}
-                  className="rounded-lg shadow-sm shadow-black/5 bg-primary text-primary-foreground h-9 px-4 py-2 min-w-48"
+                  className="rounded-lg shadow-sm shadow-black/5 h-9 px-4 py-2 min-w-48 bg-gradient-to-r from-[#40bfae]/15 via-[#40bfae]/10 to-[#7dd3c0]/15 border border-[#40bfae]/20 text-[#40bfae] hover:from-[#40bfae]/25 hover:via-[#40bfae]/20 hover:to-[#7dd3c0]/25 transition-all duration-300"
                 />
                 <WorkspaceContent searchable title="Switch Workspace">
                   <Button
