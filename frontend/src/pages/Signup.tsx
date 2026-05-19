@@ -13,17 +13,17 @@ interface PasswordRule {
 
 function PasswordRequirementsPanel({ rules }: { rules: PasswordRule[] }) {
   return (
-    <div className="rounded-lg border border-border bg-muted/40 p-3 space-y-2">
-      <p className="text-xs font-medium text-foreground">Password requirements</p>
+    <div className="rounded-lg border border-[#2a2a2a] bg-[#1a1a1a] p-3 space-y-2">
+      <p className="text-xs font-medium text-white">Password requirements</p>
       <ul className="space-y-1.5">
         {rules.map((rule) => (
           <li key={rule.label} className="flex items-center gap-2 text-xs">
             {rule.met ? (
-              <CheckCircle2 className="h-3.5 w-3.5 text-accent-success shrink-0" />
+              <CheckCircle2 className="h-3.5 w-3.5 text-[#40bfae] shrink-0" />
             ) : (
-              <XCircle className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+              <XCircle className="h-3.5 w-3.5 text-[#555] shrink-0" />
             )}
-            <span className={rule.met ? 'text-foreground' : 'text-muted-foreground'}>
+            <span className={rule.met ? 'text-white' : 'text-[#666]'}>
               {rule.label}
             </span>
           </li>
@@ -81,85 +81,84 @@ export default function Signup() {
       return;
     }
     setSuccess(true);
-    // If session exists (e.g. email confirmation disabled), go to app
     if (data.session) {
       navigate('/app', { replace: true });
     }
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden bg-background">
-      {/* Animated background – floating blurred blobs */}
+    <div className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden bg-[#0A0A0A]">
+      {/* Animated gradient background */}
       <div className="absolute inset-0 pointer-events-none" aria-hidden>
-        <div
-          className="login-bg-blob absolute rounded-full opacity-20"
-          style={{
-            width: 'min(80vmax, 480px)',
-            height: 'min(80vmax, 480px)',
-            left: '10%',
-            top: '20%',
-            background: 'hsl(var(--primary))',
-            filter: 'blur(80px)',
-            animation: 'loginBgFloat 22s ease-in-out infinite alternate',
-          }}
-        />
-        <div
-          className="login-bg-blob absolute rounded-full opacity-[0.15]"
-          style={{
-            width: 'min(70vmax, 400px)',
-            height: 'min(70vmax, 400px)',
-            right: '5%',
-            bottom: '15%',
-            background: 'hsl(var(--primary))',
-            filter: 'blur(70px)',
-            animation: 'loginBgFloat 25s ease-in-out infinite alternate-reverse',
-            animationDelay: '-5s',
-          }}
-        />
         <div
           className="login-bg-blob absolute rounded-full opacity-[0.12]"
           style={{
-            width: 'min(60vmax, 360px)',
-            height: 'min(60vmax, 360px)',
+            width: 'min(80vmax, 600px)',
+            height: 'min(80vmax, 600px)',
+            left: '5%',
+            top: '10%',
+            background: '#40bfae',
+            filter: 'blur(100px)',
+            animation: 'loginBgFloat 25s ease-in-out infinite alternate',
+          }}
+        />
+        <div
+          className="login-bg-blob absolute rounded-full opacity-[0.08]"
+          style={{
+            width: 'min(70vmax, 500px)',
+            height: 'min(70vmax, 500px)',
+            right: '5%',
+            bottom: '10%',
+            background: '#40bfae',
+            filter: 'blur(90px)',
+            animation: 'loginBgFloat 30s ease-in-out infinite alternate-reverse',
+            animationDelay: '-8s',
+          }}
+        />
+        <div
+          className="login-bg-blob absolute rounded-full opacity-[0.06]"
+          style={{
+            width: 'min(60vmax, 400px)',
+            height: 'min(60vmax, 400px)',
             left: '50%',
             top: '50%',
-            marginLeft: 'min(-30vmax, -180px)',
-            marginTop: 'min(-30vmax, -180px)',
-            background: 'hsl(var(--muted-foreground))',
-            filter: 'blur(90px)',
-            animation: 'loginBgFloat 20s ease-in-out infinite alternate',
-            animationDelay: '-10s',
+            marginLeft: 'min(-30vmax, -200px)',
+            marginTop: 'min(-30vmax, -200px)',
+            background: '#3dc4b0',
+            filter: 'blur(120px)',
+            animation: 'loginBgFloat 22s ease-in-out infinite alternate',
+            animationDelay: '-12s',
           }}
         />
       </div>
 
-      <div className="relative w-full max-w-md rounded-xl shadow-lg bg-card border border-border p-8">
+      <div className="relative w-full max-w-md rounded-2xl shadow-2xl bg-[#111111] border border-[#1e1e1e] p-8">
         <div className="space-y-6">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center shrink-0">
-              <span className="text-lg font-bold text-primary-foreground">◎</span>
+            <div className="w-10 h-10 rounded-xl bg-[#40bfae] flex items-center justify-center shrink-0">
+              <span className="text-lg font-bold text-[#0A0A0A]">◎</span>
             </div>
-            <span className="text-xl font-semibold text-foreground">Loop AI</span>
+            <span className="text-xl font-semibold text-white">Loop AI</span>
           </div>
 
           <div>
-            <h1 className="text-2xl font-semibold text-foreground">Create an account</h1>
-            <p className="text-sm text-muted-foreground mt-1">
+            <h1 className="text-2xl font-semibold text-white">Create an account</h1>
+            <p className="text-sm text-[#888] mt-1">
               Create your account to get started
             </p>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
             {error && (
-              <p className="text-sm text-destructive text-center">{error}</p>
+              <p className="text-sm text-red-400 text-center">{error}</p>
             )}
             {success && (
-              <p className="text-sm text-center text-muted-foreground">
+              <p className="text-sm text-center text-[#888]">
                 Account created. Check your email to confirm, or sign in below.
               </p>
             )}
             <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
+              <Label htmlFor="email" className="text-white">Email</Label>
               <Input
                 id="email"
                 type="email"
@@ -168,15 +167,16 @@ export default function Signup() {
                 onChange={(e) => setEmail(e.target.value)}
                 required
                 autoComplete="email"
+                className="bg-[#1a1a1a] border-[#2a2a2a] text-white placeholder:text-[#555] focus:border-[#40bfae] focus:ring-[#40bfae]/20"
               />
             </div>
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <Label htmlFor="password">Password</Label>
+                <Label htmlFor="password" className="text-white">Password</Label>
                 <button
                   type="button"
                   onClick={() => setShowPasswords((prev) => !prev)}
-                  className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                  className="inline-flex items-center gap-1 text-xs text-[#888] hover:text-white transition-colors"
                 >
                   {showPasswords ? (
                     <>
@@ -203,11 +203,12 @@ export default function Signup() {
                 required
                 autoComplete="new-password"
                 minLength={9}
+                className="bg-[#1a1a1a] border-[#2a2a2a] text-white placeholder:text-[#555] focus:border-[#40bfae] focus:ring-[#40bfae]/20"
               />
               <PasswordRequirementsPanel rules={passwordRules} />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="confirm-password">Re-enter password</Label>
+              <Label htmlFor="confirm-password" className="text-white">Re-enter password</Label>
               <Input
                 id="confirm-password"
                 type={showPasswords ? 'text' : 'password'}
@@ -220,19 +221,24 @@ export default function Signup() {
                 required
                 autoComplete="new-password"
                 minLength={9}
+                className="bg-[#1a1a1a] border-[#2a2a2a] text-white placeholder:text-[#555] focus:border-[#40bfae] focus:ring-[#40bfae]/20"
               />
               {showPasswordMismatch && (
-                <p className="text-xs text-destructive">Password does not match</p>
+                <p className="text-xs text-red-400">Password does not match</p>
               )}
             </div>
-            <Button type="submit" className="w-full" disabled={!canSubmit}>
+            <Button
+              type="submit"
+              className="w-full bg-[#40bfae] hover:bg-[#3ab3a0] text-[#0A0A0A] font-semibold disabled:opacity-50"
+              disabled={!canSubmit}
+            >
               {isLoading ? 'Creating account...' : 'Sign up'}
             </Button>
           </form>
 
-          <p className="text-center text-sm text-muted-foreground">
+          <p className="text-center text-sm text-[#888]">
             Already have an account?{' '}
-            <Link to="/login" className="text-primary underline underline-offset-2">
+            <Link to="/login" className="text-[#40bfae] hover:opacity-80 transition-opacity">
               Sign in
             </Link>
           </p>
