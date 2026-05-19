@@ -262,9 +262,9 @@ export default function PromptPage() {
                   <span>Settings</span>
                 </button>
               </DialogTrigger>
-              <DialogContent className="sm:max-w-[425px]">
+              <DialogContent className="sm:max-w-[425px] bg-black border border-neutral-700">
                 <DialogHeader>
-                  <DialogTitle>Settings</DialogTitle>
+                  <DialogTitle className="text-neutral-100">Settings</DialogTitle>
                 </DialogHeader>
                 <div className="space-y-4 py-4">
                   <div className="space-y-2">
@@ -306,8 +306,8 @@ export default function PromptPage() {
         </motion.header>
 
         {/* Main content */}
-        <div className="flex-1 flex flex-col items-center justify-end px-4 md:px-6 lg:px-8 pb-8 md:pb-12">
-          <div className="w-full max-w-2xl mx-auto flex flex-col min-h-0" style={{ maxHeight: "calc(100vh - 180px)" }}>
+        <div className={`flex-1 flex flex-col items-center px-4 md:px-6 lg:px-8 pb-8 md:pb-12 ${messages.length === 0 ? 'justify-center' : 'justify-end'}`}>
+          <div className="w-full max-w-2xl mx-auto flex flex-col min-h-0" style={{ maxHeight: messages.length === 0 ? "none" : "calc(100vh - 180px)" }}>
             {/* Welcome state */}
             <AnimatePresence>
               {showWelcome && messages.length === 0 && (
